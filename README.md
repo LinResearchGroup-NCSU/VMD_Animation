@@ -26,6 +26,8 @@ Open VMD and start TkConsole, and ensure your coordinate file and trajectory fil
         source with_capture.tcl #take picture while animation is playing
         #or
         source without_capture.tcl #Play animation only
+        #Skip step 2-6 if you already saved your viewpoints to a file
+        source your_viewpoints_file.tcl 
 ### Step 2: Identify the key frames which contain your key conformations
 ### Step 3: Swith to key frame 1, save current viewpoint to 0
         save_vp 0
@@ -35,4 +37,14 @@ Open VMD and start TkConsole, and ensure your coordinate file and trajectory fil
         save_vp 2
 ### Step 6: Write all the viewpoints to a file 
         write_vps your_viewpoint_file.tcl
+
+## Animation
+### Step 1: Set user-defined parameter, please modified
+#### Parameter 1(Example)
+    set start_frame 70 #Your animation will start at frame 70
+    set end_frame 3269 #Your animation will end at frame 3269
+    set key_frames {83 2957 3104 3268} #Your key conformations located at frame 83, 2957, 3104, 3268
+#### Parameter 2(Example)
+    set frames_per_section 150 #The number of frames to be captured between each key frames
+To make
     
