@@ -49,7 +49,8 @@ Open VMD and start TkConsole, and ensure your coordinate file and trajectory fil
 To make the time intervel between each key frames the same, here we do a simple mathemathics to skip frames. 
 
 $$
-\frac{{\text{key\_frame}_{i+1} - \text{key\_frame}_i}}{{\text{frames\_per\_section} - 1}}
+\frac{\text{key\_frame}_{i+1} - \text{key\_frame}_i}{\text{frames\_per\_section} - 1}
 $$
+
 
     
