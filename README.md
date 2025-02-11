@@ -1,4 +1,4 @@
-# VMD_Animation
+![image](https://github.com/user-attachments/assets/2b70c287-6f76-49b5-ba1d-8b2b527f9e5b)# VMD_Animation
 Here is a step-by-step guide to generate scientific presentation-ready movies of biomolecular conformational changes from raw MD trajectory. Enjoy!
 ## Start
 Open VMD and start TkConsole, and ensure your coordinate file and trajectory file are in directory VMD_Animation, otherwise you need to specifiy their paths within render.tcl
@@ -46,5 +46,9 @@ Open VMD and start TkConsole, and ensure your coordinate file and trajectory fil
     set key_frames {83 2957 3104 3268} #Your key conformations located at frame 83, 2957, 3104, 3268
 #### Parameter 2(Example)
     set frames_per_section 150 #The number of frames to be captured between each key frames
-To make
+To make the time intervel between each key frames the same, here we do a simple mathemathics to skip frames. 
+$$
+\frac{{\text{key\_frame}_{i+1} - \text{key\_frame}_i}}{{\text{frames\_per\_section} - 1}}
+$$
+
     
