@@ -5,7 +5,7 @@ Open VMD and start TkConsole, and ensure your coordinate file and trajectory fil
 
 `cd VMD_Animation`
 
-## Render: 
+## Render 
 ### Step 1: Provide the path to the PDB and XTC files with frames to be imported in the script
     #example:
         mol new mutl_open_CA.pdb
@@ -20,4 +20,19 @@ Open VMD and start TkConsole, and ensure your coordinate file and trajectory fil
 ### Step 2: Specify the region to be aligned, molecule ID and reference frame number
     #example:(This command will align all frames of molecule 0 to the reference region defined by residues 331 to 508 and 863 to 1040 in frame 0.)
         align_all_frames "resid 331 to 508 or resid 863 to 1040" 0 0
+
+## Select the best viewpoint for your key conformations
+### Step 1: Source file
+        source with_capture.tcl #take picture while animation is playing
+        #or
+        source without_capture.tcl #Play animation only
+### Step 2: Identify the key frames which contain your key conformations
+### Step 3: Swith to key frame 1, save current viewpoint to 0
+        save_vp 0
+### Step 4: Rotate the molecule to satified viewpoint, save the viewpoint to 1
+        save_vp 1
+### Step 5: Swith to key frame 2, rotate your molecule, save the virepoint to 2, continue to do this for the rest of key frames
+        save_vp 2
+### Step 6: Write all the viewpoints to a file 
+        write_vps your_viewpoint_file.tcl
     
