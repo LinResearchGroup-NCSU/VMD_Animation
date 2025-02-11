@@ -47,10 +47,8 @@ Open VMD and start TkConsole, and ensure your coordinate file and trajectory fil
 #### Parameter 2(Example)
     set frames_per_section 150 #The number of frames to be captured between each key frames
 To make the time intervel between each key frames the same, here we do a simple mathemathics to skip frames. 
+![image](https://github.com/user-attachments/assets/81a9794f-93fb-46c7-8f52-61f311f43e4c)
 
-$$
-\frac{\texttt{key\_frame}_{i+1} - \texttt{key\_frame}_i}{\texttt{frames\_per\_section} - 1}
-$$
 
 
 
