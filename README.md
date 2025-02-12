@@ -6,7 +6,7 @@ Open VMD and launch TkConsole. Ensure that your coordinate and trajectory files 
         cd VMD_Animation
 
 ## Render 
-### Step 1 Provide the path to the PDB and XTC files with frames to be imported in `render.tcl`
+### Step 1. Provide the path to the PDB and XTC files with frames to be imported in `render.tcl`
 Example:
 
 ```tcl
@@ -14,21 +14,21 @@ mol new mutl_open_CA.pdb
 mol addfile output_NVT_timecorrected.xtc first 12800 last 16069
 ```
 
-### Step 2 Modify parameters in `render.tcl` to customize the rendering.
-### Step 3 Source the script
+### Step 2. Modify parameters in `render.tcl` to customize the rendering.
+### Step 3. Source the script
         source render.tcl
 
 ## Align all frames to a reference region
-### Step 1 Source the alignment script
+### Step 1. Source the alignment script
         source Align_all_frames.tcl
         
-### Step 2 Specify the region to be aligned, molecule ID and reference frame number
+### Step 2. Specify the region to be aligned, molecule ID and reference frame number
 Example: This command will align all frames of molecule 0 to the reference region defined by residues 331 to 508 and 863 to 1040 in frame 0.
 
         align_all_frames "resid 331 to 508 or resid 863 to 1040" 0 0
 
 ## Select the best viewpoint for your key conformations
-### Step 1 Source the script
+### Step 1. Source the script
 Take pictures while the animation is playing:
 
         source with_capture.tcl
@@ -41,25 +41,25 @@ Skip steps 2-6 if you have already saved your viewpoints to a file, then:
 
         source your_viewpoints_file.tcl 
         
-### Step 2 Identify the key frames containing your key conformations.
-### Step 3 Switch to key frame 1, save the current viewpoint as viewpoint 0:
+### Step 2. Identify the key frames containing your key conformations.
+### Step 3. Switch to key frame 1, save the current viewpoint as viewpoint 0:
 
         save_vp 0
         
-### Step 4 Rotate the molecule to the desired viewpoint, then save it as viewpoint 1:
+### Step 4. Rotate the molecule to the desired viewpoint, then save it as viewpoint 1:
 
         save_vp 1
         
-### Step 5 Switch to key frame 2, rotate the molecule, and save the viewpoint as viewpoint 2. Continue this process for the remaining key frames:
+### Step 5. Switch to key frame 2, rotate the molecule, and save the viewpoint as viewpoint 2. Continue this process for the remaining key frames:
 
         save_vp 2
         
-### Step 6 Write all the viewpoints to a file 
+### Step 6. Write all the viewpoints to a file 
 
         write_vps your_viewpoint_file.tcl
 
 ## Animation
-### Step 1 Set user-defined parameters. Please modify them as needed.
+### Step 1. Set user-defined parameters. Please modify them as needed.
 #### Parameter (Example)
 Your animation will start at frame 70.
 
@@ -102,7 +102,7 @@ Time interval for capturing while the animation is paused:
 
         set take_picture_interval 50 #Values are under exploration
     
-### Step 2 Capture
+### Step 2. Capture
 Skip step 2, if you are using `without_capture.tcl`
 Create an output directory
 
@@ -112,7 +112,7 @@ Nevigate to your output directory
 
         cd your_output_dir
 
-### Step 3 Start animation with or without capture
+### Step 3. Start animation with or without capture
 
         init_animation
 
