@@ -94,7 +94,7 @@ Pause time for key conformations in milliseconds
 
         set pause_time 35000 
         
-Here the author set the value of 35000 in with_capture.tcl, as the render method TachyonInternal takes certain time for rendering. If you are using a simpler render method like snapshot, you can set the value of 3500, just like what the author set in without_capture.tcl.
+Here the author set the value of 35000 in with_capture.tcl and got 8 frames captured while pausing, as the render method TachyonInternal takes certain time for rendering. If you are using a simpler render method like snapshot, you can set the value of 3500, just like what the author set in without_capture.tcl.
 
 Time interval for capturing while the animation is pausing
 
