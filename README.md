@@ -1,7 +1,7 @@
 # VMD_Animation
 Here is a step-by-step guide to generate scientific presentation-ready movies of biomolecular conformational changes from raw MD trajectory. Enjoy!
 ## Start
-Open VMD and launch TkConsole. Ensure that your coordinate and trajectory files are located in the 'VMD_Animation directory'; otherwise, specify their paths in 'render.tcl'.
+Open VMD and launch TkConsole. Ensure that your coordinate and trajectory files are located in the `VMD_Animation directory`; otherwise, specify their paths in `render.tcl`.
 
         cd VMD_Animation
 
