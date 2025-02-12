@@ -25,7 +25,9 @@ Example: This command will align all frames of molecule 0 to the reference regio
 ## Select the best viewpoint for your key conformations
 ### Step 1: Source file
 Take picture while animation is playing
+
         source with_capture.tcl
+
 or
         source without_capture.tcl 
 Play animation only
