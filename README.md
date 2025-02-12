@@ -3,7 +3,7 @@ Here is a step-by-step guide to generate scientific presentation-ready movies of
 ## Start
 Open VMD and start TkConsole, and ensure your coordinate file and trajectory file are in directory VMD_Animation, otherwise you need to specifiy their paths within render.tcl
 
-        'cd VMD_Animation'
+        cd VMD_Animation
 
 ## Render 
 ### Step 1: Provide the path to the PDB and XTC files with frames to be imported in the script
