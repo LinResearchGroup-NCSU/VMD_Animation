@@ -71,7 +71,7 @@ proc stop_animation {} {
             take_picture_loop
 
             # Pause for n seconds and then continue 
-            after $pause_time "animate forward; after 10 stop_animation"
+            after $pause_time "animate goto [expr {$current_frame + 1}]; after 10 stop_animation"
         } else {
             
             # Continue in other frames and take pictures every n steps
