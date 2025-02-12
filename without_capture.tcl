@@ -1,4 +1,6 @@
 source visualization.tcl
+source la.tcl
+source orient.tcl
 
 ##################################################################User-defined Variables##################################################
 set start_frame 70 ;
