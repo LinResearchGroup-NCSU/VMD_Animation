@@ -19,8 +19,9 @@ Open VMD and start TkConsole, and ensure your coordinate file and trajectory fil
         source Align_all_frames.tcl
         
 ### Step 2: Specify the region to be aligned, molecule ID and reference frame number
-        align_all_frames "resid 331 to 508 or resid 863 to 1040" 0 0
 Example: This command will align all frames of molecule 0 to the reference region defined by residues 331 to 508 and 863 to 1040 in frame 0.
+
+        align_all_frames "resid 331 to 508 or resid 863 to 1040" 0 0
 
 ## Select the best viewpoint for your key conformations
 ### Step 1: Source file
