@@ -118,7 +118,17 @@ Nevigate to your output directory
 
 *Note: If you're using the TachyonInternal renderer with all the cool effects enabled and displaying the molecule at high resolution, the execution time is likely to be longer. However, this will depend on the performance of your computer.*
 
+## Movie Making
+The author used **VideoMatch**, a movie-making software recommended by VMD, to concatenate the output images into a complete movie.
 
+You can download **VideoMatch** here: [VideoMatch Download](https://gromada.com/videomach/)
+
+With **VideoMatch**, you can easily add annotations and export the final movie.
+
+## Example: Visulize four key comformational changes of MutLα
+The author used the script above to generate a movie visualizing four key conformational changes of MutLα, starting from a raw MD trajectory.
+
+You can see the example movie here: [MutLα](https://youtu.be/FPb0yXllI84)
 
 
 
