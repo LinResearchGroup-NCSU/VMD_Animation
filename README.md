@@ -106,7 +106,7 @@ Time interval for capturing while the animation is paused:
 Skip step 2, if you are using `without_capture.tcl`
 Create an output directory
 
-        mdkir your_output_dir
+        mkdir your_output_dir
 
 Nevigate to your output directory
 
