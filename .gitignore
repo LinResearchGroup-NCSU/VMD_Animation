@@ -1,0 +1,37 @@
+# Unity-generated directories
+/Unity_VR_Client/[Ll]ibrary/
+/Unity_VR_Client/[Tt]emp/
+/Unity_VR_Client/[Oo]bj/
+/Unity_VR_Client/[Bb]uild/
+/Unity_VR_Client/[Bb]uilds/
+/Unity_VR_Client/[Ll]ogs/
+/Unity_VR_Client/[Uu]ser[Ss]ettings/
+/Unity_VR_Client/[Mm]emoryCaptures/
+/Unity_VR_Client/[Rr]ecordings/
+
+# Unity/IDE-generated project files
+/Unity_VR_Client/.vs/
+/Unity_VR_Client/ExportedObj/
+/Unity_VR_Client/*.csproj
+/Unity_VR_Client/*.unityproj
+/Unity_VR_Client/*.sln
+/Unity_VR_Client/*.slnx
+/Unity_VR_Client/*.suo
+/Unity_VR_Client/*.tmp
+/Unity_VR_Client/*.user
+/Unity_VR_Client/*.userprefs
+/Unity_VR_Client/*.pidb
+/Unity_VR_Client/*.booproj
+/Unity_VR_Client/*.svd
+/Unity_VR_Client/*.opendb
+/Unity_VR_Client/*.VC.db
+/Unity_VR_Client/sysinfo.txt
+
+# VMD bridge test output
+/VMD_VR_Bridge/_test_bridge_result_*.txt
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+/Unity_VR_Client/.vscode/
