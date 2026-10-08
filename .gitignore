@@ -1,6 +1,7 @@
 # Unity-generated directories
 /Unity_VR_Client/[Ll]ibrary/
 /Unity_VR_Client/[Tt]emp/
+# Temp includes VMDStaticExports/ and static-export-tests/ (OBJ/MTL and test fixtures).
 /Unity_VR_Client/[Oo]bj/
 /Unity_VR_Client/[Bb]uild/
 /Unity_VR_Client/[Bb]uilds/
@@ -29,9 +30,41 @@
 
 # VMD bridge test output
 /VMD_VR_Bridge/_test_bridge_result_*.txt
+/VMD_VR_Bridge/_test_static_export_result_*.txt
+# Temporary PDB fixtures can remain if a bridge regression process is interrupted.
+/VMD_VR_Bridge/.vrbridge_test_*.pdb
+/.vrbridge_test_*.pdb
 
 # Operating-system metadata
 .DS_Store
 Thumbs.db
 Desktop.ini
 /Unity_VR_Client/.vscode/
+
+# Unity scene recovery and diagnostic output
+/Unity_VR_Client/Assets/_Recovery/
+/Unity_VR_Client/Assets/_Recovery.meta
+/Unity_VR_Client/Assets/__Backupscenes/
+/Unity_VR_Client/Assets/__Backupscenes.meta
+/Unity_VR_Client/Assets/StreamingAssets/aa/
+/Unity_VR_Client/Assets/StreamingAssets/aa.meta
+/Unity_VR_Client/Logs.meta
+/Unity_VR_Client/crash-report.*
+/Unity_VR_Client/mono_crash.*
+
+# IDE caches and generated build/debug artifacts
+/Unity_VR_Client/.idea/
+/Unity_VR_Client/.gradle/
+/Unity_VR_Client/*.apk
+/Unity_VR_Client/*.aab
+/Unity_VR_Client/*.unitypackage
+/Unity_VR_Client/*.app/
+/Unity_VR_Client/*.pdb
+/Unity_VR_Client/*.mdb
+
+# Unity build profiling output (keep source Assets and their .meta files tracked)
+/Unity_VR_Client/*_BackUpThisFolder_ButDontShipItWithYourGame/
+/Unity_VR_Client/*_BurstDebugInformation_DoNotShip/
+
+
+.render.tcl

@@ -268,7 +268,6 @@ proc ::vrbridge::handle_command {line} {
                 animate pause
                 set result "OK PAUSE"
             }
-            # Not implemented yet:TODO
             TOGGLE {
                 if ([animate info] eq "paused") {
                     animate forward
@@ -308,8 +307,20 @@ proc ::vrbridge::handle_command {line} {
                 ::vrbridge::highlight [lindex $args 0]
                 set result [list OK HIGHLIGHT [string toupper [lindex $args 0]]]
             }
+            GET_COORDS {
+                set molid [::vrbridge::top_molecule]
+                set frame [molinfo $molid get frame]
+                set coords [atomselect $molid "all" frame $frame]
+                set coord_list [$coords get {x y z}]
+                $coords delete
+                set result [list COORDS $coord_list]
+            }
             HELP {
-                set result [list COMMANDS PING STATE PLAY PAUSE TOGGLE FRAME STEP HIGHLIGHT HELP]
+                set result [list COMMANDS PING STATE PLAY PAUSE TOGGLE FRAME STEP HIGHLIGHT GET_COORDS EXPORT_SCENE SET_REPRESENTATION HELP]
+            }
+            EXPORT_SCENE -
+            SET_REPRESENTATION {
+                set result [::vrbridge::scene_command $command $args]
             }
             default {
                 error "Unknown command '$command'"
@@ -320,3 +331,6 @@ proc ::vrbridge::handle_command {line} {
     }
     return $result
 }
+
+# Keep representation export separate from the existing command/coordinate bridge.
+source [file join [file dirname [info script]] static_scene.tcl]

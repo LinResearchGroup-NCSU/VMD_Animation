@@ -432,6 +432,82 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1147326086
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1147326087}
+  - component: {fileID: 1147326088}
+  - component: {fileID: 1147326089}
+  - component: {fileID: 1147326090}
+  m_Layer: 0
+  m_Name: MoleculeRenderer
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1147326087
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1147326086}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -0, y: -0, z: -0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1147326088
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1147326086}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 120f1ec52de2fa2489dcb8641ca80d7c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MoleculeRenderer
+  atomPrefab: {fileID: 1949139143294735213, guid: e92a572df161d6e4f8eb58164bdcc63d, type: 3}
+  client: {fileID: 0}
+  coordinateScale: 0.1
+  atomSize: 5
+--- !u!114 &1147326089
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1147326086}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 04e86575d1d8b7045bb3202860ae42b9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::RepresentationController
+  refreshInterval: 0.5
+  currentDrawingMethods: 
+--- !u!114 &1147326090
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1147326086}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 528f2e2f945207049855576321c27a45, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::QuickSurfRenderer
 --- !u!1 &1481969705
 GameObject:
   m_ObjectHideFlags: 0
@@ -443,6 +519,7 @@ GameObject:
   - component: {fileID: 1481969706}
   - component: {fileID: 1481969707}
   - component: {fileID: 1481969708}
+  - component: {fileID: 1481969709}
   m_Layer: 0
   m_Name: VMDManager
   m_TagString: Untagged
@@ -486,9 +563,24 @@ MonoBehaviour:
   m_GameObject: {fileID: 1481969705}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: ff538054567803d429d12aafc39edcc6, type: 3}
+  m_Script: {fileID: 11500000, guid: ec9834106cc50594a906e7acddacf95d, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::VMDClient
+  m_EditorClassIdentifier: Assembly-CSharp::VMDKeyboardController
+  trajectoryController: {fileID: 0}
+--- !u!114 &1481969709
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1481969705}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 841dfa250e2797045b9bcd8b11fe7039, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TrajectoryController
+  client: {fileID: 0}
+  stepInterval: 0.1
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -497,3 +589,4 @@ SceneRoots:
   - {fileID: 410087041}
   - {fileID: 832575519}
   - {fileID: 1481969706}
+  - {fileID: 1147326087}
