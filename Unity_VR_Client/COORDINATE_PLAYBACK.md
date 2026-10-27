@@ -7,7 +7,8 @@
 
    ```tcl
    catch {::vrbridge::stop}
-   source C:/Users/niuni/Lab/VMD_Animation/VMD_VR_Bridge/vmd_vr_bridge.tcl
+   # Replace C:/path/to/VMD_Animation with your repository location.
+   source C:/path/to/VMD_Animation/VMD_VR_Bridge/vmd_vr_bridge.tcl
    ::vrbridge::start 45454
    ```
 
