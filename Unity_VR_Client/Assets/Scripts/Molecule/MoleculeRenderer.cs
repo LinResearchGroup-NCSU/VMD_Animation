@@ -17,6 +17,8 @@ public class MoleculeRenderer : MonoBehaviour
     private RepresentationController representationController;
     public float CoordinateScale => coordinateScale;
 
+    // Resolve the VMDClient, attach and initialize the RepresentationController,
+    // subscribe to coordinate updates, and render any coordinates already cached.
     private void OnEnable()
     {
         if (client == null)
@@ -40,6 +42,8 @@ public class MoleculeRenderer : MonoBehaviour
         RenderMolecule(subscribedClient.Coordinates);
     }
 
+    // Request the first coordinate frame once the asynchronous connection is up;
+    // reset the request flag on disconnect so it is requested again after reconnecting.
     private void Update()
     {
         if (subscribedClient == null)
@@ -51,14 +55,17 @@ public class MoleculeRenderer : MonoBehaviour
             return;
         }
 
-        // Wait for the asynchronous connection before requesting the first frame.
+        // Start each Play session at VMD frame 0, not the previously selected frame.
+        // VMDClient requests coordinates after receiving the OK FRAME acknowledgement.
         if (!requestedInitialCoordinates)
         {
-            requestedInitialCoordinates = true;
-            subscribedClient.RequestCoordinates();
+            requestedInitialCoordinates = subscribedClient.SendCommand("FRAME 0");
         }
     }
 
+    // Render one frame of atom coordinates: validate every position, center the frame on its
+    // mean position, then create or reuse atom instances and hide surplus ones.
+    // In VMD representation mode, queue a fresh export instead of drawing fallback atoms.
     public void RenderMolecule(IReadOnlyList<Vector3> coordinates)
     {
         if (coordinates == null)
@@ -67,7 +74,12 @@ public class MoleculeRenderer : MonoBehaviour
             return;
         }
 
-        bool refit = representationController != null && representationController.OnCoordinatesUpdated();
+        if (coordinates.Count > 0 && representationController != null &&
+            representationController.OnCoordinatesUpdated())
+        {
+            HideLegacyAtoms();
+            return;
+        }
 
         if (coordinates.Count > 0 && atomPrefab == null)
         {
@@ -121,20 +133,22 @@ public class MoleculeRenderer : MonoBehaviour
             if (atoms[i] != null)
                 atoms[i].SetActive(false);
         }
-        if (refit) representationController.FitView();
     }
 
+    // Hide all atom instances, e.g. when a static VMD scene replaces the atom view.
     public void HideLegacyAtoms()
     {
         foreach (GameObject atom in atoms)
             if (atom != null) atom.SetActive(false);
     }
 
+    // Return true if the value is neither NaN nor infinity.
     private static bool IsFinite(float value)
     {
         return !float.IsNaN(value) && !float.IsInfinity(value);
     }
 
+    // Unsubscribe from coordinate updates and reset the initial-request state.
     private void OnDisable()
     {
         if (subscribedClient != null)
@@ -143,6 +157,7 @@ public class MoleculeRenderer : MonoBehaviour
         requestedInitialCoordinates = false;
     }
 
+    // Destroy all atom instances created by this renderer.
     private void OnDestroy()
     {
         foreach (GameObject atom in atoms)

@@ -24,6 +24,8 @@ namespace eval ::vrbridge_test {
     variable awaited_line ""
 }
 
+# Write a two-atom temporary PDB, load it into VMD and duplicate frames
+# so the molecule has three frames for frame/step tests.
 proc ::vrbridge_test::make_fixture {} {
     variable fixture
     variable molid
@@ -43,6 +45,8 @@ proc ::vrbridge_test::make_fixture {} {
     animate goto 0
 }
 
+# Stop animation, close the test client, stop the bridge, and delete the
+# temporary molecule and PDB file so each test starts from a clean state.
 proc ::vrbridge_test::cleanup {} {
     variable fixture
     variable molid
@@ -64,6 +68,8 @@ proc ::vrbridge_test::cleanup {} {
     }
 }
 
+# File-event callback: store the next line read from the socket (or __EOF__)
+# in awaited_line to wake up await_line.
 proc ::vrbridge_test::socket_readable {channel} {
     variable awaited_line
     if {[gets $channel line] >= 0} {
@@ -73,6 +79,8 @@ proc ::vrbridge_test::socket_readable {channel} {
     }
 }
 
+# Wait for one line from the channel using the event loop.
+# Returns the line, or __TIMEOUT__ / __EOF__ if nothing arrives.
 proc ::vrbridge_test::await_line {channel {timeout_ms 1500}} {
     variable awaited_line
     set awaited_line ""
@@ -84,6 +92,8 @@ proc ::vrbridge_test::await_line {channel {timeout_ms 1500}} {
     return $awaited_line
 }
 
+# Read bridge messages until one starts with expected_first_word and return it;
+# error after 6 non-matching messages, a timeout, or EOF.
 proc ::vrbridge_test::read_until {channel expected_first_word} {
     for {set attempt 0} {$attempt < 6} {incr attempt} {
         set line [::vrbridge_test::await_line $channel]
@@ -97,6 +107,8 @@ proc ::vrbridge_test::read_until {channel expected_first_word} {
     error "Did not receive $expected_first_word within 6 bridge messages"
 }
 
+# Create the test molecule, start the bridge on the test port, and open a
+# non-blocking TCP client connection to it.
 proc ::vrbridge_test::connect_client {} {
     variable client
     variable port
@@ -106,6 +118,8 @@ proc ::vrbridge_test::connect_client {} {
     fconfigure $client -blocking 0 -buffering line -translation lf -encoding utf-8
 }
 
+# Send one command line to the bridge and return the first reply starting
+# with expected_first_word.
 proc ::vrbridge_test::send_command {command expected_first_word} {
     variable client
     puts $client $command
@@ -113,6 +127,8 @@ proc ::vrbridge_test::send_command {command expected_first_word} {
     return [::vrbridge_test::read_until $client $expected_first_word]
 }
 
+# Poll the event loop until the bridge has exactly 'expected' connected clients.
+# Returns 1 on success, 0 on timeout.
 proc ::vrbridge_test::await_client_count {expected {timeout_ms 1500}} {
     set deadline [expr {[clock milliseconds] + $timeout_ms}]
     while {[llength $::vrbridge::clients] != $expected} {
@@ -126,6 +142,8 @@ proc ::vrbridge_test::await_client_count {expected {timeout_ms 1500}} {
     return 1
 }
 
+# Read bridge messages until a STATE message reports expected_frame and return it;
+# error after 10 non-matching messages, a timeout, or EOF.
 proc ::vrbridge_test::read_state_frame {channel expected_frame} {
     for {set attempt 0} {$attempt < 10} {incr attempt} {
         set line [::vrbridge_test::await_line $channel]

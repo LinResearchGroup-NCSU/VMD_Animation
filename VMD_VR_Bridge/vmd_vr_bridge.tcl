@@ -32,6 +32,13 @@ namespace eval vrbridge {
     variable selections
 
     # These labels map to MutLalpha domains from the existing VMD project.
+    # N_DOMAIN, C_DOMAIN and LINKER use hard-coded resid ranges for this dataset;
+    # they do not automatically identify domains in other proteins or numbering schemes.
+    # resid is the residue identifier, not the atom index. These expressions have no
+    # chain/segname filter, so repeated residue IDs across chains can select extra atoms.
+    # Before using HIGHLIGHT with another structure, verify its domain boundaries,
+    # residue numbering and chain/segment IDs, then adapt this mapping as needed.
+    # Unadapted ranges may select incorrect atoms or nothing; ALL clears the highlight.
     array set selections {
         N_DOMAIN {resid 1 to 315 or resid 533 to 848}
         C_DOMAIN {resid 331 to 508 or resid 863 to 1040}
@@ -68,6 +75,8 @@ proc ::vrbridge::stop {} {
     variable timer
 
     foreach channel $clients {
+        ::vrbridge::trajectory_disconnect $channel
+        ::vrbridge::scene_disconnect $channel
         catch {close $channel}
     }
     set clients {}
@@ -110,6 +119,8 @@ proc ::vrbridge::accept {channel address remote_port} {
 # It removes the client from the list of connected clients and closes the channel.
 proc ::vrbridge::disconnect {channel} {
     variable clients
+    ::vrbridge::trajectory_disconnect $channel
+    ::vrbridge::scene_disconnect $channel
     set index [lsearch -exact $clients $channel]
     if {$index >= 0} {
         set clients [lreplace $clients $index $index]
@@ -139,7 +150,7 @@ proc ::vrbridge::receive {channel} {
     }
 
     while {[gets $channel line] >= 0} {
-        set response [::vrbridge::handle_command [string trim $line]]
+        set response [::vrbridge::handle_command [string trim $line] $channel]
         if {$response ne ""} {
             ::vrbridge::send $channel $response
         }
@@ -245,7 +256,7 @@ proc ::vrbridge::highlight {label} {
 # This function processes a command string, executes the corresponding action in VMD,
 # and returns a response message. It supports commands like PING, STATE, PLAY, PAUSE,
 # TOGGLE, FRAME, STEP, HIGHLIGHT, and HELP.
-proc ::vrbridge::handle_command {line} {
+proc ::vrbridge::handle_command {line {channel ""}} {
     if {$line eq ""} {
         return ""
     }
@@ -256,6 +267,9 @@ proc ::vrbridge::handle_command {line} {
 
     if {[catch {
         switch -- $command {
+            TRAJ_OPEN - TRAJ_READ - TRAJ_CHECK - TRAJ_SYNC - TRAJ_STYLE {
+                set result [::vrbridge::trajectory_command $command $args $channel]
+            }
             PING { set result "PONG" }
             STATE {
                 set result [::vrbridge::state_message]
@@ -316,11 +330,18 @@ proc ::vrbridge::handle_command {line} {
                 set result [list COORDS $coord_list]
             }
             HELP {
-                set result [list COMMANDS PING STATE PLAY PAUSE TOGGLE FRAME STEP HIGHLIGHT GET_COORDS EXPORT_SCENE SET_REPRESENTATION HELP]
+                set result [list COMMANDS PING STATE PLAY PAUSE TOGGLE FRAME STEP HIGHLIGHT GET_COORDS GET_SCENE_STATE EXPORT_SCENE SET_REPRESENTATION RELEASE_SCENE TRAJ_OPEN TRAJ_READ TRAJ_CHECK TRAJ_SYNC TRAJ_STYLE HELP]
+            }
+            GET_SCENE_STATE {
+                set result [::vrbridge::scene_state]
+            }
+            RELEASE_SCENE {
+                if {[llength $args] != 1} { error "Usage: RELEASE_SCENE <requestId>" }
+                set result [::vrbridge::scene_release [lindex $args 0] $channel]
             }
             EXPORT_SCENE -
             SET_REPRESENTATION {
-                set result [::vrbridge::scene_command $command $args]
+                set result [::vrbridge::scene_command $command $args $channel]
             }
             default {
                 error "Unknown command '$command'"
@@ -334,3 +355,4 @@ proc ::vrbridge::handle_command {line} {
 
 # Keep representation export separate from the existing command/coordinate bridge.
 source [file join [file dirname [info script]] static_scene.tcl]
+source [file join [file dirname [info script]] trajectory.tcl]

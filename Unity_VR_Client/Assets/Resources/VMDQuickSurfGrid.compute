@@ -1,0 +1,173 @@
+// QuickSurf on the GPU: a Gaussian density grid like VMD's QuickSurf, then marching
+// tetrahedra. Vertices stay in VMD coordinates; the draw shader applies the view.
+#pragma kernel ClearGrid
+#pragma kernel SplatAtoms
+#pragma kernel BuildSurface
+
+// Fixed-point scale for portable integer atomics (float atomics are not universal).
+#define DENSITY_SCALE 65536.0
+
+struct Atom { float3 position; float invTwoSigma2; float3 color; float cutoff; };
+struct SurfaceVertex { float3 position; float3 normal; uint color; };
+
+StructuredBuffer<Atom> _Atoms;
+RWStructuredBuffer<uint> _Density;
+RWStructuredBuffer<uint> _ColorSum; // Three density-weighted channels per grid point.
+RWStructuredBuffer<uint> _Counter;
+RWStructuredBuffer<SurfaceVertex> _Vertices;
+
+uint _AtomCount, _CellCount, _ThreadCount, _Capacity;
+uint _DimX, _DimY, _DimZ;
+float _Spacing, _Isovalue;
+float4 _Origin;
+
+// Freudenthal split of a cube into six tetrahedra around the 0-6 diagonal. Every cube
+// is split the same way, so neighboring cubes share face diagonals and edges (no cracks).
+static const int3 Corner[8] = { int3(0,0,0), int3(1,0,0), int3(1,1,0), int3(0,1,0),
+                                int3(0,0,1), int3(1,0,1), int3(1,1,1), int3(0,1,1) };
+static const uint Tetra[24] = { 0,5,1,6, 0,1,2,6, 0,2,3,6, 0,3,7,6, 0,7,4,6, 0,4,5,6 };
+
+uint Cell(int3 c) { return (uint)c.x + _DimX * ((uint)c.y + _DimY * (uint)c.z); }
+int3 Clamp(int3 c) { return clamp(c, int3(0,0,0), int3(_DimX, _DimY, _DimZ) - 1); }
+float Density(int3 c) { return _Density[Cell(Clamp(c))] / DENSITY_SCALE; }
+
+[numthreads(256,1,1)]
+void ClearGrid(uint3 id : SV_DispatchThreadID)
+{
+    for (uint i = id.x; i < _CellCount; i += _ThreadCount)
+    {
+        _Density[i] = 0;
+        _ColorSum[i*3] = 0; _ColorSum[i*3+1] = 0; _ColorSum[i*3+2] = 0;
+    }
+    if (id.x == 0) _Counter[0] = 0;
+}
+
+[numthreads(64,1,1)]
+void SplatAtoms(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _AtomCount) return;
+    Atom atom = _Atoms[id.x];
+    float3 grid = (atom.position - _Origin.xyz) / _Spacing;
+    float reach = atom.cutoff / _Spacing;
+    int3 low = max(int3(ceil(grid - reach)), int3(0,0,0));
+    int3 high = min(int3(floor(grid + reach)), int3(_DimX, _DimY, _DimZ) - 1);
+    float cutoff2 = atom.cutoff * atom.cutoff;
+    for (int z = low.z; z <= high.z; z++)
+    for (int y = low.y; y <= high.y; y++)
+    for (int x = low.x; x <= high.x; x++)
+    {
+        float3 offset = _Origin.xyz + float3(x, y, z) * _Spacing - atom.position;
+        float r2 = dot(offset, offset);
+        if (r2 > cutoff2) continue;
+        float density = exp(-r2 * atom.invTwoSigma2);
+        uint quantized = (uint)(density * DENSITY_SCALE + 0.5);
+        if (quantized == 0) continue;
+        uint cell = Cell(int3(x, y, z));
+        float3 weighted = density * saturate(atom.color) * DENSITY_SCALE + 0.5;
+        InterlockedAdd(_Density[cell], quantized);
+        InterlockedAdd(_ColorSum[cell*3], (uint)weighted.r);
+        InterlockedAdd(_ColorSum[cell*3+1], (uint)weighted.g);
+        InterlockedAdd(_ColorSum[cell*3+2], (uint)weighted.b);
+    }
+}
+
+float3 Gradient(int3 c)
+{
+    return float3(Density(c + int3(1,0,0)) - Density(c - int3(1,0,0)),
+                  Density(c + int3(0,1,0)) - Density(c - int3(0,1,0)),
+                  Density(c + int3(0,0,1)) - Density(c - int3(0,0,1)));
+}
+
+float3 AtomColor(int3 c)
+{
+    uint cell = Cell(c);
+    uint weight = _Density[cell];
+    if (weight == 0) return float3(1,1,1);
+    return float3(_ColorSum[cell*3], _ColorSum[cell*3+1], _ColorSum[cell*3+2]) / weight;
+}
+
+uint Pack(float3 color)
+{
+    uint3 bytes = (uint3)(saturate(color) * 255.0 + 0.5);
+    return bytes.x | (bytes.y << 8) | (bytes.z << 16) | (255u << 24);
+}
+
+static int3 baseCell;
+static float value[8];
+static float3 gradient[8];
+static float3 tint[8];
+
+SurfaceVertex Edge(uint i, uint j)
+{
+    float t = saturate((_Isovalue - value[i]) / (value[j] - value[i]));
+    SurfaceVertex v;
+    v.position = _Origin.xyz + lerp(float3(baseCell + Corner[i]), float3(baseCell + Corner[j]), t) * _Spacing;
+    float3 g = lerp(gradient[i], gradient[j], t);
+    // Density decreases outward, so the outward normal is the negative gradient.
+    v.normal = dot(g, g) > 1e-20 ? -normalize(g) : float3(0,0,0);
+    v.color = Pack(lerp(tint[i], tint[j], t));
+    return v;
+}
+
+void Emit(SurfaceVertex a, SurfaceVertex b, SurfaceVertex c)
+{
+    float3 face = cross(b.position - a.position, c.position - a.position);
+    if (dot(face, face) < 1e-24) return;
+    face = normalize(face);
+    if (dot(a.normal, a.normal) == 0) a.normal = face;
+    if (dot(b.normal, b.normal) == 0) b.normal = face;
+    if (dot(c.normal, c.normal) == 0) c.normal = face;
+    uint slot;
+    InterlockedAdd(_Counter[0], 1, slot);
+    // The CPU grows the buffer and rebuilds when the count exceeds the capacity.
+    if (slot >= _Capacity) return;
+    _Vertices[slot*3] = a; _Vertices[slot*3+1] = b; _Vertices[slot*3+2] = c;
+}
+
+[numthreads(4,4,4)]
+void BuildSurface(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x + 1 >= _DimX || id.y + 1 >= _DimY || id.z + 1 >= _DimZ) return;
+    baseCell = int3(id);
+    uint inside = 0;
+    for (uint k = 0; k < 8; k++)
+    {
+        value[k] = Density(baseCell + Corner[k]);
+        if (value[k] >= _Isovalue) inside++;
+    }
+    if (inside == 0 || inside == 8) return;
+    for (uint n = 0; n < 8; n++)
+    {
+        gradient[n] = Gradient(baseCell + Corner[n]);
+        tint[n] = AtomColor(baseCell + Corner[n]);
+    }
+    for (uint t = 0; t < 6; t++)
+    {
+        uint corner[4] = { Tetra[t*4], Tetra[t*4+1], Tetra[t*4+2], Tetra[t*4+3] };
+        uint mask = 0;
+        for (uint m = 0; m < 4; m++) if (value[corner[m]] >= _Isovalue) mask |= 1u << m;
+        if (mask == 0 || mask == 15) continue;
+        uint count = countbits(mask);
+        if (count != 2)
+        {
+            // One corner differs from the other three: a single triangle around it.
+            uint lone = firstbitlow(count == 1 ? mask : (~mask & 15));
+            uint other[3];
+            uint o = 0;
+            for (uint q = 0; q < 4; q++) if (q != lone) other[o++] = q;
+            Emit(Edge(corner[lone], corner[other[0]]), Edge(corner[lone], corner[other[1]]),
+                 Edge(corner[lone], corner[other[2]]));
+        }
+        else
+        {
+            // Two inside (a, b) and two outside (c, d): a quad split into two triangles.
+            uint a = firstbitlow(mask), b = firstbithigh(mask);
+            uint outsideMask = ~mask & 15;
+            uint c = firstbitlow(outsideMask), d = firstbithigh(outsideMask);
+            SurfaceVertex ac = Edge(corner[a], corner[c]), ad = Edge(corner[a], corner[d]);
+            SurfaceVertex bd = Edge(corner[b], corner[d]), bc = Edge(corner[b], corner[c]);
+            Emit(ac, ad, bd);
+            Emit(ac, bd, bc);
+        }
+    }
+}

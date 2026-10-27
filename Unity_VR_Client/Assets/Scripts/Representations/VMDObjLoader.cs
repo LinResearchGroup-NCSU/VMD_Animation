@@ -42,6 +42,10 @@ public static class VMDObjLoader
         public FaceVertex(int position, int normal) { this.position = position; this.normal = normal; }
     }
 
+    // Parse a VMD-exported Wavefront OBJ (and its MTL library) into Unity-ready mesh parts.
+    // Converts to Unity's left-handed coordinates, fan-triangulates polygons, splits batches by
+    // group, transparency and a 60k-vertex limit, and enforces input size limits.
+    // Safe to run off the main thread; honors the cancellation token.
     public static Scene Load(string path, CancellationToken token)
     {
         path = Path.GetFullPath(path);
@@ -148,6 +152,8 @@ public static class VMDObjLoader
             scene.warnings.Add("VMD exported no triangles. Check visible representations and whether the molecule supports the selected method.");
         return scene;
 
+        // Append one triangle vertex to a part with its position, normal (falling back to the face
+        // normal), material color, specular and ambient data, and grow the scene bounds.
         void Add(FaceVertex vertex, Part part, ObjMaterial material, Vector3 faceNormal)
         {
             Vector3 position = positions[vertex.position];
@@ -165,12 +171,14 @@ public static class VMDObjLoader
         }
     }
 
+    // Remove a trailing '#' comment and surrounding whitespace from an OBJ/MTL line.
     private static string StripComment(string line)
     {
         int hash = line.IndexOf('#');
         return (hash >= 0 ? line.Substring(0, hash) : line).Trim();
     }
 
+    // Ensure the file exists and is no larger than maxBytes.
     private static void CheckFile(string path, long maxBytes)
     {
         var file = new FileInfo(path);
@@ -178,6 +186,7 @@ public static class VMDObjLoader
         if (file.Length > maxBytes) throw new FormatException("Export file exceeds the static import size limit.");
     }
 
+    // Parse a finite float using the invariant culture; throw on invalid input.
     private static float Number(string text)
     {
         if (!float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out float value) ||
@@ -186,6 +195,8 @@ public static class VMDObjLoader
         return value;
     }
 
+    // Parse an OBJ face token (v, v/vt, v//vn or v/vt/vn) into zero-based position and normal
+    // indices; the normal index is -1 when absent.
     private static FaceVertex Index(string token, int positions, int normals)
     {
         string[] parts = token.Split('/');
@@ -194,6 +205,7 @@ public static class VMDObjLoader
             parts.Length == 3 && parts[2].Length > 0 ? Resolve(parts[2], normals) : -1);
     }
 
+    // Convert a 1-based (or negative, relative) OBJ index to a zero-based index and range-check it.
     private static int Resolve(string text, int count)
     {
         if (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) || value == 0)
@@ -203,6 +215,8 @@ public static class VMDObjLoader
         return (int)index;
     }
 
+    // Read an MTL file and fill the material table with diffuse (Kd), specular (Ks), ambient (Ka),
+    // shininess (Ns) and opacity (d / Tr). Texture maps are not imported and only produce a warning.
     private static void ReadMaterials(string path, Dictionary<string, ObjMaterial> materials,
         HashSet<string> warnings, CancellationToken token)
     {

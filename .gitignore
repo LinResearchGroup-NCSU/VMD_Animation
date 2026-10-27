@@ -31,6 +31,8 @@
 # VMD bridge test output
 /VMD_VR_Bridge/_test_bridge_result_*.txt
 /VMD_VR_Bridge/_test_static_export_result_*.txt
+/VMD_VR_Bridge/_test_trajectory_result_*.txt
+/VMD_VR_Bridge/_test_cartoon_result_*.txt
 # Temporary PDB fixtures can remain if a bridge regression process is interrupted.
 /VMD_VR_Bridge/.vrbridge_test_*.pdb
 /.vrbridge_test_*.pdb
@@ -66,5 +68,12 @@ Desktop.ini
 /Unity_VR_Client/*_BackUpThisFolder_ButDontShipItWithYourGame/
 /Unity_VR_Client/*_BurstDebugInformation_DoNotShip/
 
+# Local rendering configuration and environment overrides
+/.render.tcl
+/.env
+/.env.local
+/.env.*.local
 
-.render.tcl
+# Generated playback-check previews; keep test sources and fixtures trackable
+/Unity_VR_Client/Tests/cartoon-preview.png
+/Unity_VR_Client/Tests/quicksurf-preview.png

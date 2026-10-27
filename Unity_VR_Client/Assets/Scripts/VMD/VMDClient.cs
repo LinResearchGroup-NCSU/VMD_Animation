@@ -5,6 +5,8 @@ using System.IO;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEngine;
 // A Unity component that connects to a VMD Tcl bridge over TCP, sends commands, and receives atom coordinates.
 // The VMD Tcl bridge must be started in VMD before Play mode, e.g. by running the Tcl script in the VMD console:
@@ -19,10 +21,56 @@ public class VMDClient : MonoBehaviour
     private readonly List<Vector3> coordinates = new List<Vector3>();
 
     public bool IsConnected => writer != null;
+    // VMD's displayed frame from STATE broadcasts and FRAME/STEP replies (-1 until known).
+    public int VmdFrame { get; private set; } = -1;
+    public int VmdFrameCount { get; private set; } = -1;
     public IReadOnlyList<Vector3> Coordinates => coordinates;
     // Notify subscribers when new coordinates are received from VMD.
     public event Action<IReadOnlyList<Vector3>> CoordinatesReceived;
     public event Action<string> StaticSceneResponseReceived;
+    private event Action<string> TrajectoryResponseReceived;
+
+    // Shared by coordinate playback and future XR controls. Request IDs isolate late replies.
+    public async Task<VMDTrajectoryReply> RequestTrajectory(string command, CancellationToken token)
+    {
+        string id = Guid.NewGuid().ToString("N");
+        var completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void Receive(string line)
+        {
+            // Every TRAJJSON envelope starts with requestId; avoid parsing other requests' large payloads.
+            if (line.StartsWith("TRAJJSON {\"requestId\":\"" + id + "\"", StringComparison.Ordinal))
+                completion.TrySetResult(line.Substring(9));
+            else if (line.StartsWith("ERROR ", StringComparison.Ordinal) && line.Contains("TRAJ_"))
+                completion.TrySetException(new InvalidOperationException("Reload the updated VMD bridge."));
+        }
+        TrajectoryResponseReceived += Receive;
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            int space = command.IndexOf(' ');
+            string wire = space < 0 ? command + " " + id : command.Substring(0,space) + " " + id + command.Substring(space);
+            if (!SendCommand(wire)) throw new IOException("VMD is not connected.");
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            while (!completion.Task.IsCompleted)
+            {
+                token.ThrowIfCancellationRequested();
+                if (!IsConnected) throw new IOException("VMD disconnected.");
+                if (timer.Elapsed.TotalSeconds > 15) throw new TimeoutException("VMD coordinate request timed out.");
+                await Task.WhenAny(completion.Task, Task.Delay(50, token));
+            }
+            string json = await completion.Task;
+            var reply = await Task.Run(() => JsonUtility.FromJson<VMDTrajectoryReply>(json), token);
+            token.ThrowIfCancellationRequested();
+            if (reply == null) throw new FormatException("Empty trajectory reply.");
+            if (!string.IsNullOrEmpty(reply.error)) throw new InvalidOperationException(reply.error);
+            return reply;
+        }
+        finally
+        {
+            TrajectoryResponseReceived -= Receive;
+            if (completion.Task.IsFaulted) _ = completion.Task.Exception;
+        }
+    }
 
     // Connect to VMD bridge on start, and disconnect on disable or application quit.
     private void Start()
@@ -70,7 +118,15 @@ public class VMDClient : MonoBehaviour
                         break;
                     }
 
+                    if (response.StartsWith("TRAJJSON ", StringComparison.Ordinal) ||
+                        (response.StartsWith("ERROR ", StringComparison.Ordinal) && response.Contains("TRAJ_")))
+                    {
+                        TrajectoryResponseReceived?.Invoke(response);
+                        continue;
+                    }
+
                     if (response.StartsWith("SCENEJSON ", StringComparison.Ordinal) ||
+                        response.StartsWith("SCENESTATE ", StringComparison.Ordinal) ||
                         response.StartsWith("SCENEERROR ", StringComparison.Ordinal))
                     {
                         StaticSceneResponseReceived?.Invoke(response);
@@ -89,7 +145,13 @@ public class VMDClient : MonoBehaviour
                         // FRAME and STEP both acknowledge the applied frame with OK FRAME.
                         // Request its coordinates only after VMD has completed the change.
                         if (response.StartsWith("OK FRAME ", StringComparison.Ordinal))
+                        {
+                            if (int.TryParse(response.Substring(9), NumberStyles.Integer, CultureInfo.InvariantCulture, out int frame))
+                                VmdFrame = frame;
                             RequestCoordinates();
+                        }
+                        else if (response.StartsWith("STATE ", StringComparison.Ordinal))
+                            ReadState(response);
                     }
                 }
             }
@@ -138,6 +200,19 @@ public class VMDClient : MonoBehaviour
         }
     }
 
+    // "STATE molid frame frameCount {matrices...}" from the bridge's poll and connection greeting.
+    private void ReadState(string response)
+    {
+        string[] words = response.Split(new[] { ' ' }, 5);
+        if (words.Length >= 4 &&
+            int.TryParse(words[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out int frame) &&
+            int.TryParse(words[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out int count))
+        {
+            VmdFrame = frame;
+            VmdFrameCount = count;
+        }
+    }
+
     // Request the coordinates of the current frame from VMD.
     public void RequestCoordinates()
     {
@@ -179,11 +254,14 @@ public class VMDClient : MonoBehaviour
         return true;
     }
 
+    // Clear the connection state and close the TCP socket, which also ends the read loop
+    // in ConnectToVMD. Safe to call more than once.
     private void Disconnect()
     {
         TcpClient connection = client;
         client = null;
         writer = null;
+        VmdFrame = VmdFrameCount = -1;
         if (connection == null)
             return;
 
@@ -192,11 +270,13 @@ public class VMDClient : MonoBehaviour
         Debug.Log("[VMDClient] Disconnected.", this);
     }
 
+    // Close the connection when the component is disabled.
     private void OnDisable()
     {
         Disconnect();
     }
 
+    // Close the connection when the application exits.
     private void OnApplicationQuit()
     {
         Disconnect();

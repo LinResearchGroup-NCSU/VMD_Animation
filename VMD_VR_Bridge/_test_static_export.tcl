@@ -1,8 +1,23 @@
 # Run in a separate VMD text process from the VMD_VR_Bridge directory.
 source ./vmd_vr_bridge.tcl
+# Keep this suite's six exports for later parser checks; production keeps three.
+set ::vrbridge::scene_cache_keep 8
+proc scene_request {command} {
+    set response [::vrbridge::handle_command $command]
+    if {[string match "SCENEJSON *" $response]} {
+        ::vrbridge::handle_command "RELEASE_SCENE [lindex $command 1]"
+    }
+    # Respect the production cooldown instead of bypassing its queue protection.
+    after 2100
+    return $response
+}
 set out [file normalize ../Unity_VR_Client/Temp/static-export-tests]
 file mkdir $out
+# Do not rotate cache files belonging to a live interactive VMD process.
+set ::vrbridge::static_export_root [file join $out exports_[pid]]
+# Evaluate condition in the caller's scope and raise 'message' as an error if it is false.
 proc assert {condition message} { if {![uplevel 1 [list expr $condition]]} { error $message } }
+# Check that a reply is a SCENEJSON manifest and save its JSON payload to <out>/<name>.json.
 proc save_reply {name response} {
     global out
     assert {[string match "SCENEJSON *" $response]} $response
@@ -20,14 +35,14 @@ if {[catch {
     mol modselect 0 $molid {index 0 to 31}
     set previous [molinfo $molid get {{selection 0} {color 0} {material 0}}]
     foreach method {VDW CPK QuickSurf NewCartoon} {
-        save_reply $method [::vrbridge::handle_command "SET_REPRESENTATION test_$method 0 $method"]
+        save_reply $method [scene_request "SET_REPRESENTATION test_$method 0 $method"]
         assert {[lindex [lindex [molinfo $molid get {{rep 0}}] 0] 0] eq $method} "Style was not applied"
         assert {[molinfo $molid get {{selection 0} {color 0} {material 0}}] eq $previous} "Other representation settings changed"
         puts $report "PASS $method export and VMD style change"
     }
-    assert {[string match "SCENEERROR *" [::vrbridge::handle_command "SET_REPRESENTATION invalid 0 Unknown"]]} "Unsupported method accepted"
-    assert {[string match "SCENEERROR *" [::vrbridge::handle_command "SET_REPRESENTATION invalid 99 VDW"]]} "Invalid rep accepted"
-    set errorReply [::vrbridge::handle_command "SET_REPRESENTATION error_1 99 VDW"]
+    assert {[string match "SCENEERROR *" [scene_request "SET_REPRESENTATION invalid 0 Unknown"]]} "Unsupported method accepted"
+    assert {[string match "SCENEERROR *" [scene_request "SET_REPRESENTATION invalid 99 VDW"]]} "Invalid rep accepted"
+    set errorReply [scene_request "SET_REPRESENTATION error_1 99 VDW"]
     set handle [open [file join $out error.json] w]; puts $handle [string range $errorReply 11 end]; close $handle
     assert {[lindex [lindex [molinfo $molid get {{rep 0}}] 0] 0] eq "NewCartoon"} "Rejected command modified style"
     mol modstyle 0 $molid VDW
@@ -37,7 +52,7 @@ if {[catch {
     mol addrep $molid
     mol showrep $molid 1 off
     set before [molinfo $molid get {{rep 0} {rep 1} {selection 0} {selection 1} {rotate_matrix} {scale_matrix}}]
-    save_reply multi [::vrbridge::handle_command "EXPORT_SCENE multi"]
+    save_reply multi [scene_request "EXPORT_SCENE multi"]
     assert {[molinfo $molid get {{rep 0} {rep 1} {selection 0} {selection 1} {rotate_matrix} {scale_matrix}}] eq $before} "Export mutated the scene"
     assert {[mol showrep $molid 1] == 0} "Export changed visibility"
     assert {[::vrbridge::handle_command "STEP 1"] eq "OK FRAME 0"} "STEP regression"
@@ -59,7 +74,7 @@ if {[catch {
     }
     puts $handle "END"; close $handle
     set molid [mol new $fixture waitfor all]
-    save_reply CartoonBackbone [::vrbridge::handle_command "SET_REPRESENTATION backbone 0 NewCartoon"]
+    save_reply CartoonBackbone [scene_request "SET_REPRESENTATION backbone 0 NewCartoon"]
     puts $report "PASS complete-backbone NewCartoon export"
 } error options]} {
     puts $report "FAIL $error"

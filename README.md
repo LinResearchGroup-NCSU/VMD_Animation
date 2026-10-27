@@ -1,7 +1,7 @@
 # VMD_Animation
 Here is a step-by-step guide to generate scientific presentation-ready movies of biomolecular conformational changes from raw MD trajectory. Enjoy!
 
-The repository also includes a local VMD → Unity viewer with coordinate playback and VMD-generated static geometry. See [VR Extension](#vr-extension-phase-1) for setup and current limitations. The original movie-making workflow below remains available.
+The repository also includes a local VMD → Unity viewer with coordinate playback, automatic representation synchronization, and VMD-generated geometry. See [VMD and Unity viewer](#vmd-and-unity-viewer) for setup and current limitations. The original movie-making workflow below remains available.
 ## Start
 Open VMD and launch TkConsole. Ensure that your coordinate and trajectory files are located in the `VMD_Animation` directory; otherwise, specify their paths in `render.tcl`.
 
@@ -132,9 +132,9 @@ The author used the script above to generate a movie visualizing four key confor
 
 You can see the example movie here: [MutLα](https://youtu.be/FPb0yXllI84)
 
-## VR Extension (Phase 1)
+## VMD and Unity viewer
 
-The repository now also contains an experimental local bridge between VMD and a Unity client. VMD remains the source of truth for the loaded molecule, trajectory frame, representations, selections, and view transforms. The Unity project is the starting point for a separate immersive viewer and controller interface.
+The repository contains an experimental local bridge between VMD and a Unity client. VMD supplies molecular data, representation settings and coordinate snapshots. Unity controls coordinate playback and its own camera; pause and seek synchronize the displayed frame back to VMD. Compatible scenes render directly in Unity, while other scenes use exported VMD meshes. Headset input is not implemented yet.
 
 ### Extension folders
 
@@ -143,7 +143,7 @@ The repository now also contains an experimental local bridge between VMD and a 
 
 ### VMD bridge
 
-`VMD_VR_Bridge/vmd_vr_bridge.tcl` opens a UTF-8, line-based TCP server on `127.0.0.1:45454`. It accepts local client connections, returns command results, and broadcasts VMD state changes at 100 ms intervals. Because it is bound to the loopback interface, it is currently intended for a Unity client running on the same computer as VMD.
+`VMD_VR_Bridge/vmd_vr_bridge.tcl` opens a UTF-8, line-based TCP server on `127.0.0.1:45454`. It accepts local client connections, returns command results, and checks VMD state every 100 ms, broadcasting only when it changes. Because it is bound to the loopback interface and exports use shared local files, run Unity and VMD on the same computer.
 
 After loading a molecule and trajectory in VMD, the bridge can be started from the Tk Console:
 
@@ -166,19 +166,28 @@ The current command protocol supports:
 | --- | --- |
 | `PING` | Check whether the bridge is responding. |
 | `STATE` | Request the current molecule, frame count, frame index, and VMD transformation matrices. |
-| `PLAY` / `PAUSE` | Start or pause trajectory playback. |
-| `TOGGLE` | Legacy VMD-side playback toggle; use Unity's Enter/P controls for coordinate-synchronized playback. |
+| `PLAY` / `PAUSE` | Start or pause VMD-side playback; Unity uses its shared trajectory controller instead. |
+| `TOGGLE` | Legacy VMD-side command; Unity Play/Space uses its own shared playback controller. |
 | `FRAME <index>` | Move to an exact trajectory frame. |
 | `STEP <delta>` | Move forward or backward by a number of frames, clamped to the valid range. |
 | `HIGHLIGHT <selection>` | Highlight `N_DOMAIN`, `C_DOMAIN`, or `LINKER`; use `ALL` to clear the added highlight representation. |
 | `GET_COORDS` | Return the current top molecule's atom coordinates. |
+| `GET_SCENE_STATE` | Return the scene signature used to detect representation, visibility and frame changes. |
 | `EXPORT_SCENE <requestId>` | Export the visible VMD scene to OBJ/MTL and return its local path. |
 | `SET_REPRESENTATION <requestId> <repIndex> <method>` | Change the top molecule's specified representation in VMD, then export the scene. Supported methods: VDW, CPK, QuickSurf, NewCartoon. |
+| `RELEASE_SCENE <requestId>` | Release an export's import lease after Unity has finished reading its files. |
+| `TRAJ_OPEN <requestId>` | Check compatibility and return a coordinate snapshot's token, metadata and initial transform. |
+| `TRAJ_READ <requestId> <token> <start> <count>` | Read a bounded batch of coordinates without changing VMD's displayed frame. |
+| `TRAJ_CHECK <requestId> <token>` | Validate the snapshot and return VMD's current frame. |
+| `TRAJ_SYNC <requestId> <token> <frame>` | Synchronize VMD's frame to Unity after pause or seek. |
+| `TRAJ_STYLE <requestId> <repIndex> <method>` | Change drawing method and invalidate the previous trajectory snapshot. |
 | `HELP` | Return the supported command names. |
 
-When a client connects, the bridge sends `READY VMD_VR_BRIDGE 1` followed by the current `STATE`. State messages include the top molecule ID, current frame, total frame count, and VMD rotation, center, scale, and global matrices.
+**Domain-selection limitation:** In `VMD_VR_Bridge/vmd_vr_bridge.tcl`, the `selections` mapping hard-codes `N_DOMAIN`, `C_DOMAIN` and `LINKER` to the residue ranges of the current MutLα dataset. These labels do not automatically identify domains in other proteins or structures with different residue numbering. VMD's `resid` refers to residue identifiers, not atom indices; the current expressions do not restrict `chain` or `segname`, so repeated residue IDs across chains can include unintended atoms. Before using domain highlighting with another structure, verify its domain boundaries, residue numbering and chain/segment identifiers and adapt the mapping accordingly. Otherwise, highlighting may select the wrong atoms or an empty selection. `HIGHLIGHT ALL` clears the added highlight representation; it does not perform domain detection.
 
-`VMD_VR_Bridge/_test_bridge.tcl` provides regression coverage for command validation, frame control and clamping, domain highlighting, TCP connection handling, and state broadcasts. The latest run passed all 12 tests; generated test reports are ignored by Git.
+When a client connects, the bridge sends `READY VMD_VR_BRIDGE 1` followed by the current `STATE` (or an error if no molecule is loaded). State messages include the top molecule ID, current frame, total frame count, and VMD rotation, center, scale, and global matrices. Unity reads the frame and frame count from this message; it does not apply these broadcast matrices to its camera. Trajectory metadata and mesh bindings carry their own geometry transforms.
+
+`VMD_VR_Bridge/_test_bridge.tcl` provides regression coverage for command validation, frame control and clamping, domain highlighting, TCP connection handling, and state broadcasts. Generated test reports are ignored by Git.
 
 ### Unity client
 
@@ -188,17 +197,49 @@ Current scripts under `Assets/Scripts/`:
 
 | Script | Responsibility |
 | --- | --- |
-| `VMD/VMDClient.cs` | TCP connection, commands, coordinate parsing, static-scene response forwarding. |
+| `VMD/VMDClient.cs` | TCP connection, commands, coordinate/state parsing, static-scene forwarding and cancellable trajectory requests matched by request ID. |
 | `VMD/VMDKeyboardController.cs` | Desktop frame and trajectory-playback key bindings. |
 | `VMD/VMDVRController.cs` | Placeholder for future headset/controller input. |
 | `Molecule/MoleculeRenderer.cs` | Original atom objects, coordinate updates, automatic centering and atom scale; initializes the representation controller. |
 | `Molecule/RepresentationController.cs` | Static export requests, representation-switch commands, loading and switching between static and coordinate views. |
 | `Representations/VMDObjLoader.cs` | Generic OBJ/MTL parsing, coordinate-handedness conversion and mesh chunking. |
 | `Representations/VMDStaticScene.cs` | Upload imported geometry to Unity meshes and release resources. |
-| `Trajectory/TrajectoryController.cs` | Repeated `STEP 1` requests, waiting for coordinates before advancing. |
+| `Representations/VMDMeshBinding.cs` | Bind exported mesh vertices to selected atoms for approximate coordinate-driven deformation. |
+| `Trajectory/TrajectoryController.cs` | Shared Play/Pause/Step/Seek API and status bar; automatic bounded coordinate prefetch for VDW/CPK, protein NewCartoon and QuickSurf, with existing playback retained for other representations. |
+| `Trajectory/VMDCoordinateScene.cs` | Reusable instanced atom spheres and CPK bond cylinders driven by coordinates. |
+| `Trajectory/VMDCartoonScene.cs` | NewCartoon spline and ribbon mesh rebuilt from each frame's backbone. |
+| `Trajectory/VMDQuickSurfScene.cs` | QuickSurf rebuilt on the GPU from each frame's atoms (`VMDQuickSurfGrid.compute`, `VMDQuickSurf.shader`). |
 | `Camera/VMDCameraController.cs` | Orbit, pan, zoom and complete-molecule framing. |
 
-`Assets/Resources/VMDStaticGeometry.shader` displays imported colors and material properties. Unity no longer contains separate VDW/CPK/QuickSurf/NewCartoon geometry algorithms; VMD generates those shapes. The original atom-coordinate renderer remains available for trajectory playback.
+`Assets/Resources/VMDStaticGeometry.shader` displays imported colors and material properties. VDW/CPK use reusable Unity spheres/bonds; protein NewCartoon reconstructs its spline and ribbon mesh from each coordinate frame; QuickSurf rebuilds its Gaussian density surface on the GPU from each coordinate frame. These paths share automatic coordinate prefetch and playback controls. Unsupported scenes, and QuickSurf on a device without compute shaders, retain VMD-generated geometry. See [coordinate playback and small-frame testing](Unity_VR_Client/COORDINATE_PLAYBACK.md).
+
+### Show or hide NewCartoon (VMD Tk Console)
+
+`mol showrep` only controls a representation's visibility; it does not change its drawing method to NewCartoon. In VMD's **Graphics → Representations** window, first confirm that the target representation uses **NewCartoon**, then check its index (starting at `0`). `top` means the current top molecule, and `0` means its first representation, not trajectory frame 0.
+
+If NewCartoon is representation `0`:
+
+```tcl
+# Show representation 0
+mol showrep top 0 on
+
+# Hide representation 0 without deleting the representation or molecular data
+mol showrep top 0 off
+
+# Restore visibility
+mol showrep top 0 on
+```
+
+If representation `0` is Lines and representation `1` is NewCartoon, use these commands to test NewCartoon:
+
+```tcl
+mol showrep top 0 off
+mol showrep top 1 on
+```
+
+Replace the indices with those used by your molecule. If NewCartoon itself is representation `0`, running `mol showrep top 0 off` hides NewCartoon; it does not specifically disable Lines. Changing a representation's drawing method preserves its visibility, so a hidden representation remains hidden after switching to NewCartoon until you turn it `on` again.
+
+To test NewCartoon coordinate playback in Unity, keep the target NewCartoon representation visible and hide representations such as Lines that would make the scene use the existing rendering path. Then enter Unity Play mode and use the existing Play / Previous / Next buttons. `on` only restores visibility; if the model remains blank, check the atom selection, backbone data and Unity Console as well.
 
 ### Desktop controls
 
@@ -206,16 +247,17 @@ Focus the Game view while in Play mode:
 
 | Input | Action |
 | --- | --- |
-| Enter / Numpad Enter | Start coordinate playback by repeatedly requesting `STEP 1`. |
-| P | Pause Unity's step requests. |
+| Enter / Numpad Enter | Play through the shared trajectory controller. |
+| Space | Toggle the same Play/Pause controller. |
+| P | Pause the shared trajectory controller and synchronize the coordinate route's frame to VMD. |
 | Left / Right arrow | Previous / next frame. |
-| 1 / 2 / 3 | Request frame 100 / 500 / 1000 (the frame must exist). |
+| 1 / 2 / 3 | Seek to frame 100 / 500 / 1000; the coordinate route clamps to the loaded range. |
 | Left mouse drag | Orbit the molecule. |
 | Right or middle mouse drag | Pan. |
 | Mouse wheel | Zoom. |
 | F | Fit the complete visible molecule. |
 
-The existing Space binding sends the legacy `TOGGLE` command; it is not the Enter/P coordinate-playback loop. The existing H binding sends `HIGHLIGHT` without its required selection argument, so it is not a working highlight shortcut. Neither binding was changed by the static-export work.
+The Game view also provides Play/Pause, Previous and Next buttons. Keyboard, UI and future XR controls share `TrajectoryController`. The existing H binding still sends `HIGHLIGHT` without its required selection argument and is not a working highlight shortcut.
 
 ### Static representations: VMD export → Unity display
 
@@ -225,22 +267,23 @@ VMD representation settings → VMD Wavefront OBJ/MTL export
                            → Unity mesh import and display
 ```
 
-After initial coordinates arrive, `RepresentationController` exports the current VMD scene once by default (`Export On Connect`). To refresh after changing VMD's Graphics → Representations settings, select the molecule object in Play mode and use the component's **Export current VMD scene** context menu, or call `RefreshFromVMD()`. GUI changes are not automatically monitored in this phase.
+After initial coordinates arrive, `TrajectoryController` checks whether the scene supports coordinate playback. Compatible scenes prepare automatically without OBJ export. The coordinate route checks snapshot validity after filling its buffer, with checks scheduled at 0.75-second intervals; representation changes reopen the snapshot. The VMD mesh route polls the scene signature every 0.5 seconds while paused, coalesces changes, and refreshes exported geometry after the export cooldown. Camera-only changes do not trigger an export. For a manual export, pause playback and use **Export current VMD scene** or call `RefreshFromVMD()`.
 
-For future keyboard, UI or headset bindings, call `SetVDW()`, `SetCPK()`, `SetQuickSurf()`, `SetNewCartoon()`, `NextRepresentation()` or `PreviousRepresentation()`. `SetRepresentation(int repIndex, string method)` targets a specific representation on VMD's top molecule. These calls send a command to VMD, which changes the drawing method and exports the result; no new keyboard or XR bindings are installed. Switching methods applies that method's default parameters while preserving selection, coloring, material and visibility.
+For future keyboard, UI or headset bindings, call `SetVDW()`, `SetCPK()`, `SetQuickSurf()`, `SetNewCartoon()`, `NextRepresentation()` or `PreviousRepresentation()`. `SetRepresentation(int repIndex, string method)` targets a specific representation on VMD's top molecule. These calls change the drawing method in VMD and select coordinate playback for compatible VDW/CPK/protein NewCartoon/QuickSurf scenes; other scenes use the VMD mesh path. Style changes pause playback and retain the displayed frame for the same molecule. No XR input bindings are installed. Switching methods applies that method's default parameters while preserving selection, coloring, material and visibility.
 
-To import a saved export, set `Local Obj Path` and use **Load local VMD OBJ**, keeping the referenced MTL file alongside the OBJ. **Return to coordinate view** restores the original atom view.
+To import a saved export, set `Local Obj Path` and use **Load local VMD OBJ**, keeping the referenced MTL file alongside the OBJ. Keep `scene.binding` alongside bridge exports if coordinate-driven mesh playback is needed; older OBJ/MTL pairs remain loadable as static geometry. **Return to coordinate view** restores the original atom view. Explicit export/import and atom-view actions leave automatic coordinate rendering until a style change.
 
-Important phase-1 boundaries:
+Current behavior and limitations:
 
-- Static export is not a live mesh stream. New coordinates from stepping or playback dismiss the static preview and restore the original atom view. Pause playback before refreshing a static representation.
+- The VMD mesh route retains imported meshes during playback and approximately deforms top-molecule representation vertices using `scene.binding`: VDW vertices follow their nearest selected atom; other methods blend four neighboring atom displacements. Topology stays fixed, and other molecules remain static. This is not an exact surface/cartoon rebuild. Playback waits for a usable mesh and binding; it sends no per-frame export requests. Pause or a settled manual step queues a fresh VMD export while keeping the previous mesh visible.
 - Export includes the entire visible VMD scene, not just the top molecule. Unity recenters imported geometry and fits the camera; it does not apply VMD view matrices again.
-- Files are shared locally on the same computer, under `Unity_VR_Client/Temp/VMDStaticExports/`. Each request gets a separate directory; no automatic export-cache cleanup is implemented. Copy OBJ and MTL together elsewhere to retain them.
+- Files are shared locally under `Unity_VR_Client/Temp/VMDStaticExports/`. Each request gets a separate directory containing OBJ, MTL and binding data. An import lease protects files while Unity reads them; exports have a two-second cooldown, and completed bridge-owned exports are pruned to a bounded set. Copy OBJ, MTL and binding together elsewhere to retain a playable export.
+- Static export raises visible QuickSurf representations to a minimum grid spacing of 2.0 to limit export memory. This setting persists in VMD; it is not restored after export.
 - Lighting and transparency may differ from VMD. Texture maps and OBJ points/lines are not displayed. Current limits are 128 MB per OBJ, 16 MB per MTL, 2 million input vertices and 500,000 output triangles.
-- The supplied CA-only molecule currently exports empty NewCartoon geometry; a complete-backbone test produces geometry. Unity does not synthesize a replacement cartoon.
+- The Unity NewCartoon coordinate renderer supports CA-only amino-acid models as smooth coils without STRIDE. VMD Wavefront export may still produce empty NewCartoon geometry for CA-only data; use the live route or a complete-backbone structure where appropriate.
+- Compatible coordinate scenes require one visible top molecule, supported drawing/color methods, opaque materials and fixed selections. Unsupported visible reps, multiple visible molecules, dynamic selections/colors, periodic images and smoothing select the VMD mesh route. QuickSurf also requires compute shaders. In-place coordinate, radius or bond edits not reflected in scene settings require restarting Play mode.
+- The coordinate buffer defaults to 24 frames and targets 64 MiB of positions, with a minimum of two frames (one for a single-frame molecule). This excludes metadata, rendering buffers and parsing allocations. Requests contain at most four frames, reduced for large molecules. QuickSurf uses a bounded GPU grid and may coarsen its spacing; its surface can lag the displayed coordinate frame.
 - Headset input, OpenXR/Meta Quest integration, atom-picking metadata and cross-computer mesh transfer remain outside this phase.
-
-See [the detailed representation guide](VMD_VR_Bridge/REPRESENTATIONS.md) for APIs, protocol responses, import behavior and limitations.
 
 ### Validation
 
@@ -250,11 +293,15 @@ Run tests in separate VMD text processes from `VMD_VR_Bridge/`, not by sourcing 
 cd VMD_VR_Bridge
 & 'C:\Program Files\VMD\vmd.exe' -dispdev text -e ./_test_bridge.tcl -eofexit
 & 'C:\Program Files\VMD\vmd.exe' -dispdev text -e ./_test_static_export.tcl -eofexit
+# Choose a writable location for the coordinate fixtures used by Unity checks.
+$env:VMD_COORDINATE_TEST_ROOT = Join-Path $env:TEMP 'VMDCoordinateTests'
+& 'C:\Program Files\VMD\vmd.exe' -dispdev text -e ./_test_trajectory.tcl -eofexit
+& 'C:\Program Files\VMD\vmd.exe' -dispdev text -e ./_test_cartoon.tcl -eofexit
 ```
 
 The static-export test checks the four drawing methods, complete-backbone NewCartoon, invalid requests, preservation of scene settings, coordinates and frame stepping. Its fixtures, manifests and results are written to `Unity_VR_Client/Temp/static-export-tests/`.
 
-Current validation: Unity C# compilation passed; the original bridge passed 12 tests; exported-file parsing and the 60,000-vertex mesh chunk boundary passed separate parser checks. The static VMD run completed its assertions but emitted STRIDE warnings and exited nonzero. Game-view visual acceptance and headset validation are still pending.
+Unity checks under `Unity_VR_Client/Tests/` cover coordinate playback, NewCartoon reconstruction and QuickSurf GPU rendering/fallback in isolated Editor projects. See [coordinate playback verification](Unity_VR_Client/COORDINATE_PLAYBACK.md#verification) for fixture and graphics requirements. These checks do not establish production frame rates or headset readiness. Rerun the applicable tests against the current working tree; historical results are not a current validation guarantee. Game-view comparison on the intended dataset and headset validation remain necessary.
 
 ### Generated files and version control
 

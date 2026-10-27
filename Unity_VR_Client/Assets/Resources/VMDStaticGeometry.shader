@@ -1,3 +1,19 @@
+
+/*
+ * VMD Static Geometry Shader
+ *
+ * Purpose:
+ * Renders static molecular geometry exported from VMD in Unity.
+ *
+ * Features:
+ * - Transforms vertex positions and normals.
+ * - Uses vertex colors, ambient colors, and specular properties.
+ * - Calculates basic diffuse and specular lighting.
+ * - Supports double-sided rendering.
+ *
+ * Note:
+ * Requires a mesh with compatible vertex attributes.
+ */
 Shader "VMD/StaticGeometry"
 {
     Properties { _ZWrite ("Depth Write", Float) = 1 }

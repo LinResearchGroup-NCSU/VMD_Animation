@@ -29,11 +29,14 @@ public class VMDCameraController : MonoBehaviour
             main.gameObject.AddComponent<VMDCameraController>();
     }
 
+    // Cache the camera that this controller drives.
     private void Awake()
     {
         controlledCamera = GetComponent<Camera>();
     }
 
+    // Compute the combined world-space bounds of all enabled renderers under the molecule.
+    // Returns false if no MoleculeRenderer exists or nothing is currently visible.
     private bool TryGetBounds(out Bounds bounds)
     {
         bounds = default;
@@ -54,9 +57,24 @@ public class VMDCameraController : MonoBehaviour
                 bounds.Encapsulate(renderer.bounds);
             found = true;
         }
+        var coordinateScene = molecule.GetComponentInChildren<VMDCoordinateScene>();
+        if (coordinateScene != null && coordinateScene.isActiveAndEnabled && coordinateScene.HasFrame && coordinateScene.AtomInstanceCount > 0)
+        {
+            if (found) bounds.Encapsulate(coordinateScene.WorldBounds); else bounds = coordinateScene.WorldBounds;
+            found = true;
+        }
+        // GPU QuickSurf is drawn without a Renderer component.
+        var surfaceScene = molecule.GetComponentInChildren<VMDQuickSurfScene>();
+        if (surfaceScene != null && surfaceScene.isActiveAndEnabled && surfaceScene.HasBounds)
+        {
+            if (found) bounds.Encapsulate(surfaceScene.WorldBounds); else bounds = surfaceScene.WorldBounds;
+            found = true;
+        }
         return found;
     }
 
+    // Center the orbit pivot on the molecule and pick a camera distance (and orthographic size)
+    // so the molecule's bounding sphere fits entirely in view, then apply the new view.
     public void FitMolecule()
     {
         if (!TryGetBounds(out Bounds bounds))
@@ -76,6 +94,8 @@ public class VMDCameraController : MonoBehaviour
         ApplyView();
     }
 
+    // Per-frame camera control: auto-fit once geometry first appears, then handle F (refit),
+    // left-drag orbit, right/middle-drag pan, and scroll-wheel zoom.
     private void LateUpdate()
     {
         // Coordinates arrive asynchronously; fit when the first atoms become visible.
@@ -97,7 +117,8 @@ public class VMDCameraController : MonoBehaviour
         }
 
         Mouse mouse = Mouse.current;
-        if (mouse == null || !controlledCamera.pixelRect.Contains(mouse.position.ReadValue()))
+        if (mouse == null || !controlledCamera.pixelRect.Contains(mouse.position.ReadValue()) ||
+            TrajectoryController.CapturesPointer(mouse.position.ReadValue()))
             return;
 
         Vector2 delta = mouse.delta.ReadValue();
@@ -125,6 +146,8 @@ public class VMDCameraController : MonoBehaviour
         ApplyView();
     }
 
+    // Place the camera 'distance' units behind the pivot along its forward axis and
+    // update the near/far clipping planes so the whole molecule stays visible.
     private void ApplyView()
     {
         transform.position = pivot - transform.forward * distance;
