@@ -9,10 +9,12 @@
 
 
 #################################################Load file###############################################################
+# "waitfor all" reads every frame before continuing, so VMD does not redraw the scene for each loaded frame.
+# Redrawing is also paused until all representations below are set up.
+display update off
 # mol new your_coordinate_file.pdb; #user-defined, see the example above
-# mol addfile your_trajectory_file.xtc first first_frame last last_frame; #user-defined, see the example above
-mol new mutl_open_CA.pdb
-mol addfile Example_Trajectory.xtc first 0 last 2000
+# mol addfile your_trajectory_file.xtc first first_frame last last_frame waitfor all; #user-defined, see the example above
+animate goto 0
 
 #########################################Set the default display parameters, user-defined#############################################
 display resize 2560 1440 
@@ -65,7 +67,11 @@ mol addrep top
 mol representation Quicksurf
 mol material $your_material
 mol selection "resid 316 to 330 or resid 509 to 532 or resid 849 to 862 or resid 1041 to 1064"
-color change rgb 3 1 1 1 
-mol color ColorID 3 
-mol addrep top 
+color change rgb 3 1 1 1
+mol color ColorID 3
+mol addrep top
+
+#Redraw once, now that the trajectory and all representations are loaded
+display update on
+display update
  
