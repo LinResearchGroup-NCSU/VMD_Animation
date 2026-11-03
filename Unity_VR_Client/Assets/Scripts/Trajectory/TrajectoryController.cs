@@ -365,6 +365,8 @@ public class TrajectoryController : MonoBehaviour
     // One format for every route: "[route] state  frame / last" and a detail line.
     private string BuildStatus()
     {
+        if (subscribedClient != null && !subscribedClient.IsConnected && !string.IsNullOrEmpty(subscribedClient.ConnectionError))
+            return "[Offline] Not connected\n" + subscribedClient.ConnectionError;
         if (subscribedClient == null || !subscribedClient.IsConnected)
             return "[Offline] Connecting to VMD\nRun ::vrbridge::start in VMD, then enter Play mode";
         string label, state, frame, detail;

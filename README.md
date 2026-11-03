@@ -138,6 +138,7 @@ The repository contains an experimental local bridge between VMD and a Unity cli
 
 ### Extension folders
 
+- `start_vr.tcl` at the repository root starts or reloads the local bridge and prepares Lines/NewCartoon visibility on the top molecule.
 - `VMD_VR_Bridge/` contains the Tcl TCP bridge, its regression tests, and bridge-specific documentation.
 - `Unity_VR_Client/` contains the Unity 6 client project, including the scene, project settings, input configuration, and C# communication scripts.
 
@@ -145,14 +146,41 @@ The repository contains an experimental local bridge between VMD and a Unity cli
 
 `VMD_VR_Bridge/vmd_vr_bridge.tcl` opens a UTF-8, line-based TCP server on `127.0.0.1:45454`. It accepts local client connections, returns command results, and checks VMD state every 100 ms, broadcasting only when it changes. Because it is bound to the loopback interface and exports use shared local files, run Unity and VMD on the same computer.
 
-After loading a molecule and trajectory in VMD, the bridge can be started from the Tk Console:
+**Port.** 45454 is the default on both sides. To use another port, set it in VMD before starting the bridge, and give Unity the same value:
+
+```tcl
+set env(VMD_VR_PORT) 45455
+source start_vr.tcl
+```
+
+Unity's `VMDClient` uses, in order: the `-vmdPort <port>` command-line argument of a built player, the `VMD_VR_PORT` environment variable, then the **Port** field in the Inspector. `::vrbridge::start <port>` still accepts an explicit port.
+
+**Protocol handshake.** After connecting, Unity sends `HELLO <version>`. The bridge replies `HELLO OK <version>` when it matches its `protocol_version`, otherwise `HELLO MISMATCH <bridgeVersion>`. Unity sends no other commands until the handshake succeeds; on a mismatch, on a bridge too old to know `HELLO`, or with no reply within 5 s, it disconnects and shows the reason in the status bar. The bridge itself does not require `HELLO`, so console tests and older tools keep working. Increase `protocol_version` in the bridge and `VMDClient.ProtocolVersion` together, only for changes that break existing clients.
+
+Load your molecule and trajectory in VMD first. From the repository root in VMD's Tk Console, run:
+
+```tcl
+source start_vr.tcl
+```
+
+From another working directory, use the script's full path instead (replace the example with your repository location):
+
+```tcl
+source C:/path/to/VMD_Animation/start_vr.tcl
+```
+
+The launcher locates the bridge relative to itself, so no personal paths need editing in the script. It hides every **Lines** representation and shows every existing **NewCartoon** representation on the current top molecule, identifying them by drawing method rather than rep index. Other representations keep their visibility, and no representations are created. If there is no NewCartoon and hiding Lines leaves nothing visible, add or show a supported representation in **Graphics → Representations** before entering Unity Play mode. Molecular data and drawing parameters are preserved.
+
+Then open `Assets/Scenes/SampleScene.unity` in Unity and enter Play mode. Running `source start_vr.tcl` again stops and reloads the bridge, disconnecting existing clients; restart Unity Play mode afterward. The visibility adjustment runs only when the launcher is sourced, so load your data before running it.
+
+For manual startup without automatic visibility changes, run:
 
 ```tcl
 source VMD_VR_Bridge/vmd_vr_bridge.tcl
 ::vrbridge::start
 ```
 
-Run these commands from the repository root in VMD's Tk Console. When reloading an already-running bridge, first run `catch {::vrbridge::stop}`, then source the script again and restart Unity Play mode.
+Run the manual commands from the repository root. Before manually reloading an active bridge, run `::vrbridge::stop`; restart Unity Play mode after reloading.
 
 To stop it:
 
@@ -165,6 +193,7 @@ The current command protocol supports:
 | Command | Purpose |
 | --- | --- |
 | `PING` | Check whether the bridge is responding. |
+| `HELLO <version>` | Check protocol compatibility; replies `HELLO OK <version>` or `HELLO MISMATCH <bridgeVersion>`. |
 | `STATE` | Request the current molecule, frame count, frame index, and VMD transformation matrices. |
 | `PLAY` / `PAUSE` | Start or pause VMD-side playback; Unity uses its shared trajectory controller instead. |
 | `TOGGLE` | Legacy VMD-side command; Unity Play/Space uses its own shared playback controller. |
@@ -185,9 +214,9 @@ The current command protocol supports:
 
 **Domain-selection limitation:** In `VMD_VR_Bridge/vmd_vr_bridge.tcl`, the `selections` mapping hard-codes `N_DOMAIN`, `C_DOMAIN` and `LINKER` to the residue ranges of the current MutLα dataset. These labels do not automatically identify domains in other proteins or structures with different residue numbering. VMD's `resid` refers to residue identifiers, not atom indices; the current expressions do not restrict `chain` or `segname`, so repeated residue IDs across chains can include unintended atoms. Before using domain highlighting with another structure, verify its domain boundaries, residue numbering and chain/segment identifiers and adapt the mapping accordingly. Otherwise, highlighting may select the wrong atoms or an empty selection. `HIGHLIGHT ALL` clears the added highlight representation; it does not perform domain detection.
 
-When a client connects, the bridge sends `READY VMD_VR_BRIDGE 1` followed by the current `STATE` (or an error if no molecule is loaded). State messages include the top molecule ID, current frame, total frame count, and VMD rotation, center, scale, and global matrices. Unity reads the frame and frame count from this message; it does not apply these broadcast matrices to its camera. Trajectory metadata and mesh bindings carry their own geometry transforms.
+When a client connects, the bridge sends `READY VMD_VR_BRIDGE <protocolVersion>` (currently 1) followed by the current `STATE` (or an error if no molecule is loaded). State messages include the top molecule ID, current frame, total frame count, and VMD rotation, center, scale, and global matrices. Unity reads the frame and frame count from this message; it does not apply these broadcast matrices to its camera. Trajectory metadata and mesh bindings carry their own geometry transforms.
 
-`VMD_VR_Bridge/_test_bridge.tcl` provides regression coverage for command validation, frame control and clamping, domain highlighting, TCP connection handling, and state broadcasts. Generated test reports are ignored by Git.
+`VMD_VR_Bridge/_test_bridge.tcl` provides regression coverage for command validation, the `HELLO` handshake, port configuration, frame control and clamping, domain highlighting, TCP connection handling, and state broadcasts. Generated test reports are ignored by Git.
 
 ### Unity client
 
@@ -214,6 +243,8 @@ Current scripts under `Assets/Scripts/`:
 `Assets/Resources/VMDStaticGeometry.shader` displays imported colors and material properties. VDW/CPK use reusable Unity spheres/bonds; protein NewCartoon reconstructs its spline and ribbon mesh from each coordinate frame; QuickSurf rebuilds its Gaussian density surface on the GPU from each coordinate frame. These paths share automatic coordinate prefetch and playback controls. Unsupported scenes, and QuickSurf on a device without compute shaders, retain VMD-generated geometry. See [coordinate playback and small-frame testing](Unity_VR_Client/COORDINATE_PLAYBACK.md).
 
 ### Show or hide NewCartoon (VMD Tk Console)
+
+`start_vr.tcl` already hides Lines and shows existing NewCartoon representations on the top molecule at startup. The commands below are for manual visibility changes afterward, or when starting the bridge directly without the launcher.
 
 `mol showrep` only controls a representation's visibility; it does not change its drawing method to NewCartoon. In VMD's **Graphics → Representations** window, first confirm that the target representation uses **NewCartoon**, then check its index (starting at `0`). `top` means the current top molecule, and `0` means its first representation, not trajectory frame 0.
 
@@ -277,7 +308,7 @@ Current behavior and limitations:
 
 - The VMD mesh route retains imported meshes during playback and approximately deforms top-molecule representation vertices using `scene.binding`: VDW vertices follow their nearest selected atom; other methods blend four neighboring atom displacements. Topology stays fixed, and other molecules remain static. This is not an exact surface/cartoon rebuild. Playback waits for a usable mesh and binding; it sends no per-frame export requests. Pause or a settled manual step queues a fresh VMD export while keeping the previous mesh visible.
 - Export includes the entire visible VMD scene, not just the top molecule. Unity recenters imported geometry and fits the camera; it does not apply VMD view matrices again.
-- Files are shared locally under `Unity_VR_Client/Temp/VMDStaticExports/`. Each request gets a separate directory containing OBJ, MTL and binding data. An import lease protects files while Unity reads them; exports have a two-second cooldown, and completed bridge-owned exports are pruned to a bounded set. Copy OBJ, MTL and binding together elsewhere to retain a playable export.
+- Files are shared locally under `%LOCALAPPDATA%/VMD_VR/exports/` (`~/.vmd_vr/exports/` when `LOCALAPPDATA` is not defined), independent of the repository layout; Unity imports the absolute path returned by VMD. Each request gets a separate directory containing OBJ, MTL and binding data. An import lease protects files while Unity reads them; exports have a two-second cooldown, and completed bridge-owned exports are pruned to a bounded set. Copy OBJ, MTL and binding together elsewhere to retain a playable export.
 - Static export raises visible QuickSurf representations to a minimum grid spacing of 2.0 to limit export memory. This setting persists in VMD; it is not restored after export.
 - Lighting and transparency may differ from VMD. Texture maps and OBJ points/lines are not displayed. Current limits are 128 MB per OBJ, 16 MB per MTL, 2 million input vertices and 500,000 output triangles.
 - The Unity NewCartoon coordinate renderer supports CA-only amino-acid models as smooth coils without STRIDE. VMD Wavefront export may still produce empty NewCartoon geometry for CA-only data; use the live route or a complete-backbone structure where appropriate.

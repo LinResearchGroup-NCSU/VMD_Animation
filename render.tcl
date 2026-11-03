@@ -9,8 +9,10 @@
 
 
 #################################################Load file###############################################################
-mol new your_coordinate_file.pdb; #user-defined, see the example above
-mol addfile your_trajectory_file.xtc first first_frame last last_frame; #user-defined, see the example above
+# mol new your_coordinate_file.pdb; #user-defined, see the example above
+# mol addfile your_trajectory_file.xtc first first_frame last last_frame; #user-defined, see the example above
+mol new mutl_open_CA.pdb
+mol addfile Example_Trajectory.xtc first 0 last 2000
 
 #########################################Set the default display parameters, user-defined#############################################
 display resize 2560 1440 

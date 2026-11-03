@@ -2,7 +2,13 @@
 
 # File path for Unity to import the exported OBJ/MTL files.
 namespace eval ::vrbridge {
-    variable static_export_root [file normalize [file join [file dirname [info script]] .. Unity_VR_Client Temp VMDStaticExports]]
+    # Independent of the repository layout: users may only have VMD and these scripts.
+    # Unity imports the absolute OBJ path returned in each reply.
+    if {[info exists ::env(LOCALAPPDATA)] && $::env(LOCALAPPDATA) ne ""} {
+        variable static_export_root [file normalize [file join $::env(LOCALAPPDATA) VMD_VR exports]]
+    } else {
+        variable static_export_root [file normalize [file join ~ .vmd_vr exports]]
+    }
     # Keep these across script reloads; an active importer still owns its export lease.
     foreach {name value} {scene_export_busy 0 scene_export_pending {} scene_export_owner {} scene_export_expires 0 scene_export_next 0 scene_cache_keep 3 quicksurf_min_grid_spacing 2.0} {
         variable $name

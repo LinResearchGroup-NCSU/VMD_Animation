@@ -12,15 +12,27 @@ using UnityEngine;
 // The VMD Tcl bridge must be started in VMD before Play mode, e.g. by running the Tcl script in the VMD console:
 public class VMDClient : MonoBehaviour
 {
+    // Must equal protocol_version in vmd_vr_bridge.tcl; HELLO checks it after connecting.
+    public const int ProtocolVersion = 1;
+    private const float HandshakeTimeoutSeconds = 5f;
+
     private static readonly Regex CoordinatePattern = new Regex(
         @"\{\s*([^\s{}]+)\s+([^\s{}]+)\s+([^\s{}]+)\s*\}",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    // Default bridge port. Overridden by the VMD_VR_PORT environment variable,
+    // and that by the "-vmdPort <port>" command-line argument of a built player.
+    [SerializeField, Range(1, 65535)] private int port = 45454;
 
     private TcpClient client;
     private StreamWriter writer;
     private readonly List<Vector3> coordinates = new List<Vector3>();
 
+    // Set only after the bridge accepts HELLO, so no other command reaches a mismatched bridge.
     public bool IsConnected => writer != null;
+    public int Port { get; private set; }
+    // Why the last connection attempt failed or ended (null while connected or still connecting).
+    public string ConnectionError { get; private set; }
     // VMD's displayed frame from STATE broadcasts and FRAME/STEP replies (-1 until known).
     public int VmdFrame { get; private set; } = -1;
     public int VmdFrameCount { get; private set; } = -1;
@@ -75,19 +87,49 @@ public class VMDClient : MonoBehaviour
     // Connect to VMD bridge on start, and disconnect on disable or application quit.
     private void Start()
     {
+        Port = ResolvePort();
         ConnectToVMD();
     }
-    
+
+    // Command line first, then environment variable, then the Inspector value.
+    private int ResolvePort()
+    {
+        string[] arguments = Environment.GetCommandLineArgs();
+        for (int i = 0; i + 1 < arguments.Length; i++)
+        {
+            if (string.Equals(arguments[i], "-vmdPort", StringComparison.OrdinalIgnoreCase) &&
+                TryParsePort(arguments[i + 1], "-vmdPort", out int fromArgument))
+                return fromArgument;
+        }
+
+        string fromEnvironment = Environment.GetEnvironmentVariable("VMD_VR_PORT");
+        if (!string.IsNullOrWhiteSpace(fromEnvironment) &&
+            TryParsePort(fromEnvironment.Trim(), "VMD_VR_PORT", out int environmentPort))
+            return environmentPort;
+
+        return port;
+    }
+
+    private bool TryParsePort(string value, string source, out int result)
+    {
+        if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out result) &&
+            result >= 1 && result <= 65535)
+            return true;
+        Debug.LogWarning($"[VMDClient] Ignoring {source}='{value}': expected a port between 1 and 65535.", this);
+        return false;
+    }
+
     // Connect to VMD bridge
     private async void ConnectToVMD()
     {
         TcpClient connection = new TcpClient();
         client = connection;
+        ConnectionError = null;
 
         try
         {
-            Debug.Log("[VMDClient] Connecting to 127.0.0.1:45454...", this);
-            await connection.ConnectAsync("127.0.0.1", 45454);
+            Debug.Log($"[VMDClient] Connecting to 127.0.0.1:{Port}...", this);
+            await connection.ConnectAsync("127.0.0.1", Port);
 
             // Ignore a connection completed after this component was disabled.
             if (client != connection)
@@ -103,8 +145,9 @@ public class VMDClient : MonoBehaviour
                 // The existing Tcl bridge expects UTF-8, one command per LF line.
                 output.NewLine = "\n";
                 output.AutoFlush = true;
-                writer = output;
-                Debug.Log("[VMDClient] Connected.", this);
+                // writer stays null (not connected) until the bridge accepts this protocol version.
+                output.WriteLine("HELLO " + ProtocolVersion.ToString(CultureInfo.InvariantCulture));
+                _ = ExpireHandshake(connection);
 
                 while (client == connection)
                 {
@@ -114,8 +157,20 @@ public class VMDClient : MonoBehaviour
 
                     if (response == null)
                     {
+                        if (writer == null)
+                            ConnectionError = "VMD closed the connection before the handshake.";
                         Debug.LogWarning("[VMDClient] VMD closed the connection. Restart Play mode to reconnect.", this);
                         break;
+                    }
+
+                    if (writer == null && TryReadHandshake(response, output, out bool accepted))
+                    {
+                        if (!accepted)
+                        {
+                            Debug.LogError($"[VMDClient] {ConnectionError}", this);
+                            break;
+                        }
+                        continue;
                     }
 
                     if (response.StartsWith("TRAJJSON ", StringComparison.Ordinal) ||
@@ -160,7 +215,10 @@ public class VMDClient : MonoBehaviour
         {
             // Closing the socket during normal cleanup can interrupt an await.
             if (client == connection)
+            {
+                ConnectionError = $"Cannot reach the VMD bridge on port {Port}.";
                 Debug.LogError($"[VMDClient] Connection error: {exception.Message} Start the bridge, then restart Play mode.", this);
+            }
         }
         finally
         {
@@ -168,6 +226,55 @@ public class VMDClient : MonoBehaviour
                 Disconnect();
             connection.Close();
         }
+    }
+
+    // Handles the bridge's reply to HELLO; returns false for any other line.
+    // A bridge older than the handshake answers HELLO with "Unknown command".
+    private bool TryReadHandshake(string response, StreamWriter output, out bool accepted)
+    {
+        accepted = false;
+        string bridgeVersion;
+        if (response.StartsWith("HELLO OK", StringComparison.Ordinal))
+        {
+            string[] words = response.Split(' ');
+            if (words.Length != 3 || words[1] != "OK" ||
+                !int.TryParse(words[2], NumberStyles.None, CultureInfo.InvariantCulture, out int replyVersion))
+            {
+                ConnectionError = "Invalid VMD bridge handshake reply. " +
+                                  "Source the VMD scripts that came with this build.";
+                return true;
+            }
+
+            if (replyVersion == ProtocolVersion)
+            {
+                accepted = true;
+                writer = output;
+                Debug.Log($"[VMDClient] Connected (protocol {ProtocolVersion}).", this);
+                return true;
+            }
+            bridgeVersion = words[2];
+        }
+        else if (response.StartsWith("HELLO MISMATCH ", StringComparison.Ordinal))
+            bridgeVersion = response.Substring("HELLO MISMATCH ".Length);
+        else if (response.StartsWith("ERROR ", StringComparison.Ordinal) && response.Contains("'HELLO'"))
+            bridgeVersion = "0 (no handshake)";
+        else
+            return false;
+
+        ConnectionError = $"VMD bridge protocol {bridgeVersion} does not match client protocol {ProtocolVersion}. " +
+                          "Source the VMD scripts that came with this build.";
+        return true;
+    }
+
+    // Drop a connection whose peer never answers HELLO, e.g. another program on the port.
+    private async Task ExpireHandshake(TcpClient connection)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(HandshakeTimeoutSeconds));
+        if (client != connection || writer != null)
+            return;
+        ConnectionError = $"No handshake reply on port {Port}; is the VMD bridge listening there?";
+        Debug.LogError($"[VMDClient] {ConnectionError}", this);
+        Disconnect();
     }
 
     // Call on Unity's main thread from keyboard controls, UI, or future VR input.

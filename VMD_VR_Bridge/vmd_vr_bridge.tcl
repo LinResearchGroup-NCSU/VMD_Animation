@@ -15,6 +15,12 @@
 # start / stop / accept / disconnect / send / receive / handle_command / send_state / poll
 
 # ::vrbridge::start port in VMD console to start the bridge server on port.
+# Without a port, it uses the VMD_VR_PORT environment variable, or 45454.
+# In VMD: set env(VMD_VR_PORT) 45455 before sourcing start_vr.tcl.
+
+# Protocol handshake: a client sends HELLO <version> after connecting.
+# Increase protocol_version only for changes that break existing clients
+# (command arguments, reply formats, export formats); the Unity client must match.
 
 # TODO: Currently limited to localhost (127.0.0.1) for local development.
 # For future remote VR clients, allow network connections and update
@@ -22,6 +28,8 @@
 
 # Namespace for VR Bridge
 namespace eval vrbridge {
+    variable protocol_version 1
+    variable default_port 45454
     variable port 45454
     variable server ""
     variable clients {}
@@ -47,10 +55,19 @@ namespace eval vrbridge {
     }
 }
 
+# Port used when start is called without one: VMD_VR_PORT if set, otherwise 45454.
+proc ::vrbridge::configured_port {} {
+    variable default_port
+    if {[info exists ::env(VMD_VR_PORT)] && [string trim $::env(VMD_VR_PORT)] ne ""} {
+        return [::vrbridge::integer_in_range [string trim $::env(VMD_VR_PORT)] 1 65535 VMD_VR_PORT]
+    }
+    return $default_port
+}
+
 # Start the VR bridge server
-# If the server is already running, it will return the current port. 
+# If the server is already running, it will return the current port.
 # Otherwise, it will start a new server on the specified port.
-proc ::vrbridge::start {{requested_port 45454}} {
+proc ::vrbridge::start {{requested_port ""}} {
     variable server
     variable port
 
@@ -59,7 +76,10 @@ proc ::vrbridge::start {{requested_port 45454}} {
         return $port
     }
 
-    set port $requested_port
+    if {$requested_port eq ""} {
+        set requested_port [::vrbridge::configured_port]
+    }
+    set port [::vrbridge::integer_in_range $requested_port 1 65535 port]
     set server [socket -server ::vrbridge::accept -myaddr 127.0.0.1 $port]
     after 0 ::vrbridge::poll
     puts "VMD-VR bridge listening on localhost:$port"
@@ -98,6 +118,7 @@ proc ::vrbridge::stop {} {
 # and sets up a file event to handle incoming messages from the client.
 proc ::vrbridge::accept {channel address remote_port} {
     variable clients
+    variable protocol_version
 
     # The server is explicitly bound to loopback. Keep this check as defense
     # in depth if it is ever changed to listen on another interface.
@@ -109,7 +130,7 @@ proc ::vrbridge::accept {channel address remote_port} {
     fconfigure $channel -blocking 0 -buffering line -translation lf -encoding utf-8
     lappend clients $channel
     fileevent $channel readable [list ::vrbridge::receive $channel]
-    ::vrbridge::send $channel "READY VMD_VR_BRIDGE 1"
+    ::vrbridge::send $channel "READY VMD_VR_BRIDGE $protocol_version"
     ::vrbridge::send_state $channel
     puts "VR client connected from $address:$remote_port"
 }
@@ -254,7 +275,7 @@ proc ::vrbridge::highlight {label} {
 
 # Handle a command received from a client.
 # This function processes a command string, executes the corresponding action in VMD,
-# and returns a response message. It supports commands like PING, STATE, PLAY, PAUSE,
+# and returns a response message. It supports commands like PING, HELLO, STATE, PLAY, PAUSE,
 # TOGGLE, FRAME, STEP, HIGHLIGHT, and HELP.
 proc ::vrbridge::handle_command {line {channel ""}} {
     if {$line eq ""} {
@@ -271,6 +292,16 @@ proc ::vrbridge::handle_command {line {channel ""}} {
                 set result [::vrbridge::trajectory_command $command $args $channel]
             }
             PING { set result "PONG" }
+            HELLO {
+                # Other commands do not require HELLO; the client stops on a mismatch.
+                variable protocol_version
+                if {[llength $args] != 1} { error "Usage: HELLO <protocolVersion>" }
+                if {[lindex $args 0] eq $protocol_version} {
+                    set result [list HELLO OK $protocol_version]
+                } else {
+                    set result [list HELLO MISMATCH $protocol_version]
+                }
+            }
             STATE {
                 set result [::vrbridge::state_message]
             }
@@ -330,7 +361,7 @@ proc ::vrbridge::handle_command {line {channel ""}} {
                 set result [list COORDS $coord_list]
             }
             HELP {
-                set result [list COMMANDS PING STATE PLAY PAUSE TOGGLE FRAME STEP HIGHLIGHT GET_COORDS GET_SCENE_STATE EXPORT_SCENE SET_REPRESENTATION RELEASE_SCENE TRAJ_OPEN TRAJ_READ TRAJ_CHECK TRAJ_SYNC TRAJ_STYLE HELP]
+                set result [list COMMANDS PING HELLO STATE PLAY PAUSE TOGGLE FRAME STEP HIGHLIGHT GET_COORDS GET_SCENE_STATE EXPORT_SCENE SET_REPRESENTATION RELEASE_SCENE TRAJ_OPEN TRAJ_READ TRAJ_CHECK TRAJ_SYNC TRAJ_STYLE HELP]
             }
             GET_SCENE_STATE {
                 set result [::vrbridge::scene_state]

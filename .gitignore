@@ -1,7 +1,7 @@
 # Unity-generated directories
 /Unity_VR_Client/[Ll]ibrary/
 /Unity_VR_Client/[Tt]emp/
-# Temp includes VMDStaticExports/ and static-export-tests/ (OBJ/MTL and test fixtures).
+# Temp includes static-export-tests/ (OBJ/MTL test fixtures); bridge exports live in %LOCALAPPDATA%/VMD_VR/exports.
 /Unity_VR_Client/[Oo]bj/
 /Unity_VR_Client/[Bb]uild/
 /Unity_VR_Client/[Bb]uilds/

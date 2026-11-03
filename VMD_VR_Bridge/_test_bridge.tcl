@@ -7,7 +7,8 @@
 # or deletes the MutLalpha files used by the research workflow.
 
 # Tests currently cover:
-# - Command handling: PING, STATE, PLAY, PAUSE, FRAME, STEP, HIGHLIGHT, HELP, and unknown commands
+# - Command handling: PING, HELLO, STATE, PLAY, PAUSE, FRAME, STEP, HIGHLIGHT, HELP, and unknown commands
+# - Port configuration: default port, VMD_VR_PORT override, and invalid values
 # - Frame control: valid frame seeking, stepping, boundary clamping, and invalid arguments
 # - Highlighting: adding/clearing domain representations and rejecting invalid selections
 # - TCP connection: client connection, READY/STATE handshake, command responses, and client disconnection
@@ -250,6 +251,57 @@ source $::vrbridge_test::bridge_path
     -cleanup {::vrbridge_test::cleanup} \
     -result {OK PAUSE}
 
+::tcltest::test command-1.9 {HELLO accepts the bridge protocol and reports a mismatch} \
+    -setup {::vrbridge_test::make_fixture} \
+    -body {
+        list \
+            [::vrbridge::handle_command "HELLO $::vrbridge::protocol_version"] \
+            [::vrbridge::handle_command "HELLO 999"] \
+            [lindex [::vrbridge::handle_command HELLO] 0] \
+            [expr {[lsearch -exact [::vrbridge::handle_command HELP] HELLO] >= 0}]
+    } \
+    -cleanup {::vrbridge_test::cleanup} \
+    -result [list [list HELLO OK $::vrbridge::protocol_version] \
+        [list HELLO MISMATCH $::vrbridge::protocol_version] ERROR 1]
+
+::tcltest::test port-1.1 {configured_port uses 45454 unless VMD_VR_PORT is set} \
+    -setup {
+        set ::vrbridge_test::saved_env [array get ::env VMD_VR_PORT]
+        unset -nocomplain ::env(VMD_VR_PORT)
+    } \
+    -body {
+        set default [::vrbridge::configured_port]
+        set ::env(VMD_VR_PORT) " 45460 "
+        set override [::vrbridge::configured_port]
+        set ::env(VMD_VR_PORT) 70000
+        set invalid [catch {::vrbridge::configured_port}]
+        list $default $override $invalid
+    } \
+    -cleanup {
+        unset -nocomplain ::env(VMD_VR_PORT)
+        array set ::env $::vrbridge_test::saved_env
+    } \
+    -result {45454 45460 1}
+
+::tcltest::test port-1.2 {start without a port listens on VMD_VR_PORT} \
+    -setup {
+        set ::vrbridge_test::saved_env [array get ::env VMD_VR_PORT]
+        set ::env(VMD_VR_PORT) 45456
+    } \
+    -body {
+        set rejected [catch {::vrbridge::start 0}]
+        set started [::vrbridge::start]
+        set probe [socket 127.0.0.1 45456]
+        close $probe
+        list $rejected $started
+    } \
+    -cleanup {
+        ::vrbridge_test::cleanup
+        unset -nocomplain ::env(VMD_VR_PORT)
+        array set ::env $::vrbridge_test::saved_env
+    } \
+    -result {1 45456}
+
 ::tcltest::test tcp-1.1 {client receives greeting and initial state} \
     -setup {::vrbridge_test::connect_client} \
     -body {
@@ -269,6 +321,16 @@ source $::vrbridge_test::bridge_path
     } \
     -cleanup {::vrbridge_test::cleanup} \
     -result {PONG {OK FRAME 1}}
+
+::tcltest::test tcp-1.5 {client handshake over TCP} \
+    -setup {::vrbridge_test::connect_client} \
+    -body {
+        list \
+            [::vrbridge_test::send_command "HELLO $::vrbridge::protocol_version" HELLO] \
+            [::vrbridge_test::send_command PING PONG]
+    } \
+    -cleanup {::vrbridge_test::cleanup} \
+    -result [list [list HELLO OK $::vrbridge::protocol_version] PONG]
 
 ::tcltest::test tcp-1.3 {closing a client disconnects it from the bridge} \
     -setup {::vrbridge_test::connect_client} \
