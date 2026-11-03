@@ -9,12 +9,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 // A Unity component that connects to a VMD Tcl bridge over TCP, sends commands, and receives atom coordinates.
-// The VMD Tcl bridge must be started in VMD before Play mode, e.g. by running the Tcl script in the VMD console:
+// The bridge may be started (source start_vr.tcl in VMD) before or during Play mode: the client
+// retries until it connects, and reconnects whenever the bridge is reloaded or stopped.
 public class VMDClient : MonoBehaviour
 {
     // Must equal protocol_version in vmd_vr_bridge.tcl; HELLO checks it after connecting.
     public const int ProtocolVersion = 1;
     private const float HandshakeTimeoutSeconds = 5f;
+    private const float RetryIntervalSeconds = 2f;
 
     private static readonly Regex CoordinatePattern = new Regex(
         @"\{\s*([^\s{}]+)\s+([^\s{}]+)\s+([^\s{}]+)\s*\}",
@@ -27,11 +29,16 @@ public class VMDClient : MonoBehaviour
     private TcpClient client;
     private StreamWriter writer;
     private readonly List<Vector3> coordinates = new List<Vector3>();
+    private float nextConnectAttempt;
+    // A protocol mismatch would only repeat on every retry; it waits for Play mode to restart.
+    private bool retryBlocked;
+    // Log a failure once per outage, not on every retry.
+    private bool failureReported;
 
     // Set only after the bridge accepts HELLO, so no other command reaches a mismatched bridge.
     public bool IsConnected => writer != null;
     public int Port { get; private set; }
-    // Why the last connection attempt failed or ended (null while connected or still connecting).
+    // Why the last connection attempt failed or ended (null until a failure, and again once connected).
     public string ConnectionError { get; private set; }
     // VMD's displayed frame from STATE broadcasts and FRAME/STEP replies (-1 until known).
     public int VmdFrame { get; private set; } = -1;
@@ -84,11 +91,17 @@ public class VMDClient : MonoBehaviour
         }
     }
 
-    // Connect to VMD bridge on start, and disconnect on disable or application quit.
+    // Resolve the port once; Update connects, and disable or application quit disconnects.
     private void Start()
     {
         Port = ResolvePort();
-        ConnectToVMD();
+    }
+
+    // Connect as soon as possible, then retry every RetryIntervalSeconds after a failed or dropped connection.
+    private void Update()
+    {
+        if (client == null && !retryBlocked && Time.unscaledTime >= nextConnectAttempt)
+            ConnectToVMD();
     }
 
     // Command line first, then environment variable, then the Inspector value.
@@ -124,11 +137,11 @@ public class VMDClient : MonoBehaviour
     {
         TcpClient connection = new TcpClient();
         client = connection;
-        ConnectionError = null;
 
         try
         {
-            Debug.Log($"[VMDClient] Connecting to 127.0.0.1:{Port}...", this);
+            if (!failureReported)
+                Debug.Log($"[VMDClient] Connecting to 127.0.0.1:{Port}...", this);
             await connection.ConnectAsync("127.0.0.1", Port);
 
             // Ignore a connection completed after this component was disabled.
@@ -157,9 +170,10 @@ public class VMDClient : MonoBehaviour
 
                     if (response == null)
                     {
-                        if (writer == null)
-                            ConnectionError = "VMD closed the connection before the handshake.";
-                        Debug.LogWarning("[VMDClient] VMD closed the connection. Restart Play mode to reconnect.", this);
+                        ConnectionError = writer == null
+                            ? "VMD closed the connection before the handshake; reconnecting."
+                            : "VMD closed the connection; reconnecting.";
+                        ReportFailure(ConnectionError);
                         break;
                     }
 
@@ -167,6 +181,8 @@ public class VMDClient : MonoBehaviour
                     {
                         if (!accepted)
                         {
+                            retryBlocked = true;
+                            ConnectionError += " Then restart Play mode.";
                             Debug.LogError($"[VMDClient] {ConnectionError}", this);
                             break;
                         }
@@ -216,8 +232,8 @@ public class VMDClient : MonoBehaviour
             // Closing the socket during normal cleanup can interrupt an await.
             if (client == connection)
             {
-                ConnectionError = $"Cannot reach the VMD bridge on port {Port}.";
-                Debug.LogError($"[VMDClient] Connection error: {exception.Message} Start the bridge, then restart Play mode.", this);
+                ConnectionError = $"Cannot reach the VMD bridge on port {Port}; retrying every {RetryIntervalSeconds:0} s.";
+                ReportFailure($"Connection error: {exception.Message} Run source start_vr.tcl in VMD; Unity keeps retrying.");
             }
         }
         finally
@@ -249,6 +265,8 @@ public class VMDClient : MonoBehaviour
             {
                 accepted = true;
                 writer = output;
+                ConnectionError = null;
+                failureReported = false;
                 Debug.Log($"[VMDClient] Connected (protocol {ProtocolVersion}).", this);
                 return true;
             }
@@ -273,8 +291,17 @@ public class VMDClient : MonoBehaviour
         if (client != connection || writer != null)
             return;
         ConnectionError = $"No handshake reply on port {Port}; is the VMD bridge listening there?";
-        Debug.LogError($"[VMDClient] {ConnectionError}", this);
+        ReportFailure(ConnectionError);
         Disconnect();
+    }
+
+    // Warn once per outage; retries stay silent until a connection succeeds again.
+    private void ReportFailure(string message)
+    {
+        if (failureReported)
+            return;
+        failureReported = true;
+        Debug.LogWarning($"[VMDClient] {message}", this);
     }
 
     // Call on Unity's main thread from keyboard controls, UI, or future VR input.
@@ -361,20 +388,34 @@ public class VMDClient : MonoBehaviour
         return true;
     }
 
-    // Clear the connection state and close the TCP socket, which also ends the read loop
-    // in ConnectToVMD. Safe to call more than once.
+    // Clear the connection state, schedule the next attempt, and close the TCP socket, which also
+    // ends the read loop in ConnectToVMD. Safe to call more than once.
     private void Disconnect()
     {
         TcpClient connection = client;
+        bool wasConnected = writer != null;
         client = null;
         writer = null;
         VmdFrame = VmdFrameCount = -1;
+        // A reconnect starts like the first connection: consumers wait for fresh coordinates,
+        // since the bridge may now serve another molecule.
+        coordinates.Clear();
+        nextConnectAttempt = Time.unscaledTime + RetryIntervalSeconds;
         if (connection == null)
             return;
 
         // Closing the socket releases any pending read; its using blocks clean up.
         connection.Close();
-        Debug.Log("[VMDClient] Disconnected.", this);
+        if (wasConnected)
+            Debug.Log("[VMDClient] Disconnected.", this);
+    }
+
+    // Re-enabling the component connects again, even after a protocol mismatch.
+    private void OnEnable()
+    {
+        retryBlocked = false;
+        failureReported = false;
+        nextConnectAttempt = 0f;
     }
 
     // Close the connection when the component is disabled.

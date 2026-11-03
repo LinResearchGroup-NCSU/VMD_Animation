@@ -20,9 +20,12 @@ public class VMDCameraController : MonoBehaviour
     private bool fitted;
 
     // Attach only at runtime, so existing scenes and camera settings stay untouched.
+    // Runs after Awake, when VMDXRBootstrap has chosen the mode; a headset camera is never orbited.
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void AttachToMainCamera()
     {
+        if (VMDXRBootstrap.ActiveMode != VMDXRBootstrap.Mode.Desktop)
+            return;
         Camera main = Camera.main;
         if (main != null && FindAnyObjectByType<MoleculeRenderer>() != null &&
             main.GetComponent<VMDCameraController>() == null)
@@ -35,13 +38,19 @@ public class VMDCameraController : MonoBehaviour
         controlledCamera = GetComponent<Camera>();
     }
 
-    // Compute the combined world-space bounds of all enabled renderers under the molecule.
-    // Returns false if no MoleculeRenderer exists or nothing is currently visible.
+    // Bounds of the scene's MoleculeRenderer; false if none exists or nothing is currently visible.
     private bool TryGetBounds(out Bounds bounds)
     {
-        bounds = default;
         if (molecule == null)
             molecule = FindAnyObjectByType<MoleculeRenderer>();
+        return TryGetMoleculeBounds(molecule, renderers, out bounds);
+    }
+
+    // Compute the combined world-space bounds of everything drawn under the molecule.
+    // Shared with VMDXRBootstrap; 'renderers' is a reusable buffer.
+    public static bool TryGetMoleculeBounds(MoleculeRenderer molecule, List<Renderer> renderers, out Bounds bounds)
+    {
+        bounds = default;
         if (molecule == null)
             return false;
 

@@ -21,13 +21,27 @@ public class VMDKeyboardController : MonoBehaviour
     }
 
     // Translate key presses into VMD commands: Enter / P play or pause trajectory playback,
-    // 1 / 2 / 3 jump to frames 100 / 500 / 1000, Left / Right step one frame,
+    // 1 / 2 / 3 jump to frames 100 / 500 / 1000, Left / Right or , / . step one frame,
     // Space toggles the same playback controller used by desktop and XR buttons.
+    // The XR Interaction Simulator also reads Space, the arrows, digits, P and H, so in Simulator
+    // mode only keys it leaves free are used: Enter toggles playback, , / . step one frame.
     private void Update()
     {
         Keyboard keyboard = Keyboard.current;
         if (keyboard == null)
             return;
+
+        if (keyboard.commaKey.wasPressedThisFrame)
+            trajectoryController?.Step(-1);
+        if (keyboard.periodKey.wasPressedThisFrame)
+            trajectoryController?.Step(1);
+
+        if (VMDXRBootstrap.ActiveMode == VMDXRBootstrap.Mode.Simulator)
+        {
+            if (keyboard.enterKey.wasPressedThisFrame || keyboard.numpadEnterKey.wasPressedThisFrame)
+                trajectoryController?.Toggle();
+            return;
+        }
 
         if (trajectoryController != null)
         {

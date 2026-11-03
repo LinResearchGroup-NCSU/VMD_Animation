@@ -368,7 +368,7 @@ public class TrajectoryController : MonoBehaviour
         if (subscribedClient != null && !subscribedClient.IsConnected && !string.IsNullOrEmpty(subscribedClient.ConnectionError))
             return "[Offline] Not connected\n" + subscribedClient.ConnectionError;
         if (subscribedClient == null || !subscribedClient.IsConnected)
-            return "[Offline] Connecting to VMD\nRun ::vrbridge::start in VMD, then enter Play mode";
+            return "[Offline] Connecting to VMD\nRun source start_vr.tcl in VMD; Unity connects automatically";
         string label, state, frame, detail;
         switch (route)
         {

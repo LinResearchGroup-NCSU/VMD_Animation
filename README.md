@@ -155,7 +155,7 @@ source start_vr.tcl
 
 Unity's `VMDClient` uses, in order: the `-vmdPort <port>` command-line argument of a built player, the `VMD_VR_PORT` environment variable, then the **Port** field in the Inspector. `::vrbridge::start <port>` still accepts an explicit port.
 
-**Protocol handshake.** After connecting, Unity sends `HELLO <version>`. The bridge replies `HELLO OK <version>` when it matches its `protocol_version`, otherwise `HELLO MISMATCH <bridgeVersion>`. Unity sends no other commands until the handshake succeeds; on a mismatch, on a bridge too old to know `HELLO`, or with no reply within 5 s, it disconnects and shows the reason in the status bar. The bridge itself does not require `HELLO`, so console tests and older tools keep working. Increase `protocol_version` in the bridge and `VMDClient.ProtocolVersion` together, only for changes that break existing clients.
+**Protocol handshake.** After connecting, Unity sends `HELLO <version>`. The bridge replies `HELLO OK <version>` when it matches its `protocol_version`, otherwise `HELLO MISMATCH <bridgeVersion>`. Unity sends no other commands until the handshake succeeds. With no reply within 5 s it disconnects, shows the reason in the status bar and keeps retrying; on a mismatch, or on a bridge too old to know `HELLO`, it stops retrying until Play mode is restarted, since every retry would fail the same way. The bridge itself does not require `HELLO`, so console tests and older tools keep working. Increase `protocol_version` in the bridge and `VMDClient.ProtocolVersion` together, only for changes that break existing clients.
 
 Load your molecule and trajectory in VMD first. From the repository root in VMD's Tk Console, run:
 
@@ -171,7 +171,7 @@ source C:/path/to/VMD_Animation/start_vr.tcl
 
 The launcher locates the bridge relative to itself, so no personal paths need editing in the script. It hides every **Lines** representation and shows every existing **NewCartoon** representation on the current top molecule, identifying them by drawing method rather than rep index. Other representations keep their visibility, and no representations are created. If there is no NewCartoon and hiding Lines leaves nothing visible, add or show a supported representation in **Graphics → Representations** before entering Unity Play mode. Molecular data and drawing parameters are preserved.
 
-Then open `Assets/Scenes/SampleScene.unity` in Unity and enter Play mode. Running `source start_vr.tcl` again stops and reloads the bridge, disconnecting existing clients; restart Unity Play mode afterward. The visibility adjustment runs only when the launcher is sourced, so load your data before running it.
+Then open `Assets/Scenes/SampleScene.unity` in Unity and enter Play mode. Unity and VMD may be started in either order: Unity retries the connection every 2 s. Running `source start_vr.tcl` again stops and reloads the bridge, disconnecting existing clients; Unity reconnects by itself and reloads the trajectory from frame 0. The visibility adjustment runs only when the launcher is sourced, so load your data before running it.
 
 For manual startup without automatic visibility changes, run:
 
@@ -180,7 +180,7 @@ source VMD_VR_Bridge/vmd_vr_bridge.tcl
 ::vrbridge::start
 ```
 
-Run the manual commands from the repository root. Before manually reloading an active bridge, run `::vrbridge::stop`; restart Unity Play mode after reloading.
+Run the manual commands from the repository root. Before manually reloading an active bridge, run `::vrbridge::stop`; Unity reconnects once the bridge is started again.
 
 To stop it:
 
@@ -220,7 +220,7 @@ When a client connects, the bridge sends `READY VMD_VR_BRIDGE <protocolVersion>`
 
 ### Unity client
 
-`Unity_VR_Client/` is a Unity `6000.6.2f1` Universal Render Pipeline project. Open it with Unity Hub, open `Assets/Scenes/SampleScene.unity`, start the VMD bridge after loading a molecule, then enter Play mode. The client connects automatically. If connection fails or the bridge restarts, restart Play mode to reconnect.
+`Unity_VR_Client/` is a Unity `6000.6.2f1` Universal Render Pipeline project. Open it with Unity Hub, open `Assets/Scenes/SampleScene.unity`, start the VMD bridge after loading a molecule, and enter Play mode. The client connects automatically, retries every 2 s while the bridge is unavailable, and reconnects after the bridge is reloaded or stopped. Only a protocol mismatch requires restarting Play mode.
 
 Current scripts under `Assets/Scripts/`:
 
@@ -281,12 +281,14 @@ Focus the Game view while in Play mode:
 | Enter / Numpad Enter | Play through the shared trajectory controller. |
 | Space | Toggle the same Play/Pause controller. |
 | P | Pause the shared trajectory controller and synchronize the coordinate route's frame to VMD. |
-| Left / Right arrow | Previous / next frame. |
+| Left / Right arrow, or , / . | Previous / next frame. |
 | 1 / 2 / 3 | Seek to frame 100 / 500 / 1000; the coordinate route clamps to the loaded range. |
 | Left mouse drag | Orbit the molecule. |
 | Right or middle mouse drag | Pan. |
 | Mouse wheel | Zoom. |
 | F | Fit the complete visible molecule. |
+
+In Simulator mode the XR Interaction Simulator also reads Space, the arrow keys, digits, P and H, so only Enter / Numpad Enter (toggle Play/Pause) and , / . (previous / next frame) are active there.
 
 The Game view also provides Play/Pause, Previous and Next buttons. Keyboard, UI and future XR controls share `TrajectoryController`. The existing H binding still sends `HIGHLIGHT` without its required selection argument and is not a working highlight shortcut.
 

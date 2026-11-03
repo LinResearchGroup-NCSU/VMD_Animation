@@ -1,12 +1,13 @@
 # Start the local VMD-to-Unity bridge from VMD's Tk Console:
 #   source start_vr.tcl
 # From another directory, source /path/to/VMD_Animation/start_vr.tcl instead.
-# Load your molecule and trajectory in VMD first, then enter Unity Play mode.
+# Load your molecule and trajectory in VMD first. Unity may already be in Play mode;
+# it connects automatically.
 # On the top molecule, Lines representations are hidden and existing NewCartoon
 # representations are shown by drawing method, regardless of their rep indices.
 # Other representations keep their visibility; no representations are created.
 # Running this script again reloads the bridge and disconnects existing clients;
-# restart Unity Play mode afterward. Molecular data is left unchanged.
+# Unity reconnects by itself. Molecular data is left unchanged.
 # The bridge listens on port 45454; to use another port, run
 #   set env(VMD_VR_PORT) 45455
 # before sourcing, and give Unity the same port (see VMDClient).
@@ -45,7 +46,7 @@ apply {{script_directory} {
     set port [::vrbridge::start]
 
     if {[molinfo top] < 0} {
-        puts "Load a molecule and trajectory in VMD before entering Unity Play mode."
+        puts "Load a molecule and trajectory in VMD, then source this script again."
     }
-    puts "Bridge ready on port $port. Open Unity's SampleScene and enter Play mode."
+    puts "Bridge ready on port $port. Unity's SampleScene connects in Play mode, now or within 2 s if already running."
 }} [file dirname [file normalize [info script]]]
