@@ -34,13 +34,18 @@ Shader "VMD/StaticGeometry"
             struct Input {
                 float4 vertex : POSITION; float3 normal : NORMAL; float4 color : COLOR;
                 float4 specular : TEXCOORD0; float3 ambient : TEXCOORD1;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
             struct Output {
                 float4 position : SV_POSITION; float3 normal : TEXCOORD0; float3 world : TEXCOORD1;
                 float4 color : COLOR; float4 specular : TEXCOORD2; float3 ambient : TEXCOORD3;
+                UNITY_VERTEX_OUTPUT_STEREO
             };
             Output vert(Input v) {
                 Output o;
+                UNITY_SETUP_INSTANCE_ID(v);
+                UNITY_INITIALIZE_OUTPUT(Output, o);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
                 o.position = UnityObjectToClipPos(v.vertex);
                 o.normal = UnityObjectToWorldNormal(v.normal);
                 o.world = mul(unity_ObjectToWorld, v.vertex).xyz;
@@ -48,6 +53,8 @@ Shader "VMD/StaticGeometry"
                 return o;
             }
             float4 frag(Output i, fixed facing : VFACE) : SV_Target {
+                // _WorldSpaceCameraPos is per eye in stereo, so set the eye index first.
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
                 float3 n = normalize(i.normal) * (facing >= 0 ? 1 : -1);
                 float3 view = normalize(_WorldSpaceCameraPos - i.world);
                 float3 light = normalize(float3(0.3, 0.6, -0.8));

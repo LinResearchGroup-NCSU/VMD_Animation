@@ -17,11 +17,16 @@ Shader "VMD/QuickSurf"
             struct SurfaceVertex { float3 position; float3 normal; uint color; };
             StructuredBuffer<SurfaceVertex> _Vertices;
             float4x4 _RawToWorld, _RawToWorldNormal;
-            struct Output { float4 vertex : SV_POSITION; float3 normal : TEXCOORD0; float3 world : TEXCOORD1; float4 color : COLOR; };
-            Output vert(uint id : SV_VertexID)
+            // Single Pass Instanced XR draws each primitive twice; the instance ID selects the eye.
+            struct Input { uint id : SV_VertexID; UNITY_VERTEX_INPUT_INSTANCE_ID };
+            struct Output { float4 vertex : SV_POSITION; float3 normal : TEXCOORD0; float3 world : TEXCOORD1; float4 color : COLOR; UNITY_VERTEX_OUTPUT_STEREO };
+            Output vert(Input input)
             {
-                SurfaceVertex v = _Vertices[id];
+                SurfaceVertex v = _Vertices[input.id];
                 Output o;
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_INITIALIZE_OUTPUT(Output, o);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
                 o.world = mul(_RawToWorld, float4(v.position, 1)).xyz;
                 o.vertex = UnityWorldToClipPos(o.world);
                 o.normal = mul((float3x3)_RawToWorldNormal, v.normal);
@@ -30,6 +35,8 @@ Shader "VMD/QuickSurf"
             }
             float4 frag(Output i) : SV_Target
             {
+                // _WorldSpaceCameraPos is per eye in stereo, so set the eye index first.
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
                 float3 view = normalize(_WorldSpaceCameraPos - i.world);
                 float3 n = normalize(i.normal);
                 // Light the side facing the camera, also inside a surface cut by the near plane.
