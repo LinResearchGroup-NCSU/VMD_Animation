@@ -273,6 +273,57 @@ proc ::vrbridge::highlight {label} {
     display update
 }
 
+# Add or replace a named selection for SELECT and HIGHLIGHT, e.g. for another protein's domains:
+#   ::vrbridge::define_selection MY_DOMAIN {chain A and resid 10 to 120}
+# Names are case-insensitive letters, digits and underscores; ALL is reserved.
+# Definitions survive reloading the bridge, unless they redefine a built-in name.
+proc ::vrbridge::define_selection {name selection} {
+    variable selections
+    set name [string toupper $name]
+    if {![regexp {^[A-Z0-9_]{1,64}$} $name]} {
+        error "Selection names use letters, digits and underscores"
+    }
+    if {$name eq "ALL"} {
+        error "ALL is reserved"
+    }
+    if {[string trim $selection] eq ""} {
+        error "Empty selection"
+    }
+    set selections($name) $selection
+    return $name
+}
+
+# SELECT <requestId> <name | VMD selection text>
+# Resolve a selection on the top molecule to atom indices without changing anything in VMD;
+# the client draws the highlight itself. Text that is not a defined name is used as a VMD
+# atom selection and may contain spaces. Replies use their own SELJSON envelope, so clients
+# can tell them apart from trajectory replies; errors for a valid request ID are SELJSON too.
+proc ::vrbridge::select_command {words} {
+    variable selections
+    set id [lindex $words 0]
+    ::vrbridge::scene_request_id $id
+    if {[catch {
+        set text [string trim [join [lrange $words 1 end] " "]]
+        if {$text eq ""} { error "Usage: SELECT requestId <name|selection>" }
+        set label [string toupper $text]
+        if {[info exists selections($label)]} {
+            set text $selections($label)
+        } else {
+            set label ""
+        }
+        set molid [::vrbridge::top_molecule]
+        set sel [atomselect $molid $text]
+        set code [catch {$sel get index} indices options]
+        $sel delete
+        if {$code} { return -options $options $indices }
+        set data [format {"ok":true,"molecule":%d,"atomCount":%d,"label":%s,"indices":[%s]} \
+            $molid [molinfo $molid get numatoms] [::vrbridge::scene_json_string $label] [join $indices ,]]
+    } message]} {
+        set data "\"error\":[::vrbridge::scene_json_string $message]"
+    }
+    return "SELJSON [format {{"requestId":%s,%s}} [::vrbridge::scene_json_string $id] $data]"
+}
+
 # Handle a command received from a client.
 # This function processes a command string, executes the corresponding action in VMD,
 # and returns a response message. It supports commands like PING, HELLO, STATE, PLAY, PAUSE,
@@ -352,6 +403,9 @@ proc ::vrbridge::handle_command {line {channel ""}} {
                 ::vrbridge::highlight [lindex $args 0]
                 set result [list OK HIGHLIGHT [string toupper [lindex $args 0]]]
             }
+            SELECT {
+                set result [::vrbridge::select_command $args]
+            }
             GET_COORDS {
                 set molid [::vrbridge::top_molecule]
                 set frame [molinfo $molid get frame]
@@ -361,7 +415,7 @@ proc ::vrbridge::handle_command {line {channel ""}} {
                 set result [list COORDS $coord_list]
             }
             HELP {
-                set result [list COMMANDS PING HELLO STATE PLAY PAUSE TOGGLE FRAME STEP HIGHLIGHT GET_COORDS GET_SCENE_STATE EXPORT_SCENE SET_REPRESENTATION RELEASE_SCENE TRAJ_OPEN TRAJ_READ TRAJ_CHECK TRAJ_SYNC TRAJ_STYLE HELP]
+                set result [list COMMANDS PING HELLO STATE PLAY PAUSE TOGGLE FRAME STEP HIGHLIGHT SELECT GET_COORDS GET_SCENE_STATE EXPORT_SCENE SET_REPRESENTATION RELEASE_SCENE TRAJ_OPEN TRAJ_READ TRAJ_CHECK TRAJ_SYNC TRAJ_STYLE HELP]
             }
             GET_SCENE_STATE {
                 set result [::vrbridge::scene_state]

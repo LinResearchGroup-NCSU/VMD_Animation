@@ -8,6 +8,7 @@
 
 # Tests currently cover:
 # - Command handling: PING, HELLO, STATE, PLAY, PAUSE, FRAME, STEP, HIGHLIGHT, HELP, and unknown commands
+# - Selections: SELECT names, selection text and errors, define_selection
 # - Port configuration: default port, VMD_VR_PORT override, and invalid values
 # - Frame control: valid frame seeking, stepping, boundary clamping, and invalid arguments
 # - Highlighting: adding/clearing domain representations and rejecting invalid selections
@@ -126,6 +127,20 @@ proc ::vrbridge_test::send_command {command expected_first_word} {
     puts $client $command
     flush $client
     return [::vrbridge_test::read_until $client $expected_first_word]
+}
+
+# Reduce a SELJSON reply to {requestId label indices atomCount}, or {requestId ERROR message}.
+proc ::vrbridge_test::selection_reply {reply} {
+    if {![regexp {^SELJSON \{"requestId":"([^"]*)",(.*)\}$} $reply -> id body]} {
+        return [list BAD $reply]
+    }
+    if {[regexp {"error":"([^"]*)"} $body -> message]} {
+        return [list $id ERROR $message]
+    }
+    regexp {"label":"([^"]*)"} $body -> label
+    regexp {"indices":\[([^\]]*)\]} $body -> indices
+    regexp {"atomCount":([0-9]+)} $body -> count
+    return [list $id $label [split $indices ,] $count]
 }
 
 # Poll the event loop until the bridge has exactly 'expected' connected clients.
@@ -264,6 +279,52 @@ source $::vrbridge_test::bridge_path
     -result [list [list HELLO OK $::vrbridge::protocol_version] \
         [list HELLO MISMATCH $::vrbridge::protocol_version] ERROR 1]
 
+::tcltest::test select-1.1 {SELECT resolves names and selection text without changing reps} \
+    -setup {::vrbridge_test::make_fixture} \
+    -body {
+        set reps [molinfo $::vrbridge_test::molid get numreps]
+        list \
+            [::vrbridge_test::selection_reply [::vrbridge::handle_command "SELECT r1 N_DOMAIN"]] \
+            [::vrbridge_test::selection_reply [::vrbridge::handle_command "SELECT r2 c_domain"]] \
+            [::vrbridge_test::selection_reply [::vrbridge::handle_command "SELECT r3 resid 1 to 400"]] \
+            [::vrbridge_test::selection_reply [::vrbridge::handle_command "SELECT r4 none"]] \
+            [expr {[molinfo $::vrbridge_test::molid get numreps] == $reps}] \
+            [expr {[lsearch -exact [::vrbridge::handle_command HELP] SELECT] >= 0}]
+    } \
+    -cleanup {::vrbridge_test::cleanup} \
+    -result {{r1 N_DOMAIN 0 2} {r2 C_DOMAIN 1 2} {r3 {} {0 1} 2} {r4 {} {} 2} 1 1}
+
+::tcltest::test select-1.2 {SELECT reports errors in its own reply} \
+    -setup {::vrbridge_test::make_fixture} \
+    -body {
+        list \
+            [::vrbridge_test::selection_reply [::vrbridge::handle_command "SELECT r5"]] \
+            [lrange [::vrbridge_test::selection_reply [::vrbridge::handle_command "SELECT r6 ( index 0"]] 0 1] \
+            [lindex [::vrbridge::handle_command "SELECT bad/id N_DOMAIN"] 0]
+    } \
+    -cleanup {::vrbridge_test::cleanup} \
+    -result {{r5 ERROR {Usage: SELECT requestId <name|selection>}} {r6 ERROR} ERROR}
+
+::tcltest::test select-1.3 {SELECT without a molecule} \
+    -body {::vrbridge_test::selection_reply [::vrbridge::handle_command "SELECT r7 all"]} \
+    -result {r7 ERROR {No molecule is loaded in VMD}}
+
+::tcltest::test select-1.4 {define_selection adds names for SELECT and rejects invalid ones} \
+    -setup {::vrbridge_test::make_fixture} \
+    -body {
+        list \
+            [::vrbridge::define_selection my_pair {index 0 1}] \
+            [::vrbridge_test::selection_reply [::vrbridge::handle_command "SELECT r8 MY_PAIR"]] \
+            [catch {::vrbridge::define_selection ALL all}] \
+            [catch {::vrbridge::define_selection {bad name} all}] \
+            [catch {::vrbridge::define_selection EMPTY { }}]
+    } \
+    -cleanup {
+        unset -nocomplain ::vrbridge::selections(MY_PAIR)
+        ::vrbridge_test::cleanup
+    } \
+    -result {MY_PAIR {r8 MY_PAIR {0 1} 2} 1 1 1}
+
 ::tcltest::test port-1.1 {configured_port uses 45454 unless VMD_VR_PORT is set} \
     -setup {
         set ::vrbridge_test::saved_env [array get ::env VMD_VR_PORT]
@@ -331,6 +392,12 @@ source $::vrbridge_test::bridge_path
     } \
     -cleanup {::vrbridge_test::cleanup} \
     -result [list [list HELLO OK $::vrbridge::protocol_version] PONG]
+
+::tcltest::test tcp-1.6 {SELECT over TCP} \
+    -setup {::vrbridge_test::connect_client} \
+    -body {::vrbridge_test::selection_reply [::vrbridge_test::send_command "SELECT r9 C_DOMAIN" SELJSON]} \
+    -cleanup {::vrbridge_test::cleanup} \
+    -result {r9 C_DOMAIN 1 2}
 
 ::tcltest::test tcp-1.3 {closing a client disconnects it from the bridge} \
     -setup {::vrbridge_test::connect_client} \

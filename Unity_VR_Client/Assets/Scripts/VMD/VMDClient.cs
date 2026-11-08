@@ -48,6 +48,7 @@ public class VMDClient : MonoBehaviour
     public event Action<IReadOnlyList<Vector3>> CoordinatesReceived;
     public event Action<string> StaticSceneResponseReceived;
     private event Action<string> TrajectoryResponseReceived;
+    private event Action<string> SelectionResponseReceived;
 
     // Shared by coordinate playback and future XR controls. Request IDs isolate late replies.
     public async Task<VMDTrajectoryReply> RequestTrajectory(string command, CancellationToken token)
@@ -87,6 +88,50 @@ public class VMDClient : MonoBehaviour
         finally
         {
             TrajectoryResponseReceived -= Receive;
+            if (completion.Task.IsFaulted) _ = completion.Task.Exception;
+        }
+    }
+
+    // Resolve a VMD selection (a bridge name such as C_DOMAIN, or VMD selection text) to atom indices
+    // without changing VMD. Replies use their own SELJSON envelope, separate from trajectory requests,
+    // so a failed or unsupported SELECT never affects playback.
+    public async Task<VMDSelectionReply> RequestSelection(string selection, CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(selection))
+            throw new ArgumentException("Empty selection.");
+        string id = Guid.NewGuid().ToString("N");
+        var completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void Receive(string line)
+        {
+            if (line.StartsWith("SELJSON {\"requestId\":\"" + id + "\"", StringComparison.Ordinal))
+                completion.TrySetResult(line.Substring(8));
+            else if (line.StartsWith("ERROR ", StringComparison.Ordinal))
+                completion.TrySetException(new NotSupportedException("This VMD bridge has no SELECT; source the updated start_vr.tcl."));
+        }
+        SelectionResponseReceived += Receive;
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            if (!SendCommand("SELECT " + id + " " + selection.Trim())) throw new IOException("VMD is not connected.");
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            while (!completion.Task.IsCompleted)
+            {
+                token.ThrowIfCancellationRequested();
+                if (!IsConnected) throw new IOException("VMD disconnected.");
+                if (timer.Elapsed.TotalSeconds > 15) throw new TimeoutException("VMD selection request timed out.");
+                await Task.WhenAny(completion.Task, Task.Delay(50, token));
+            }
+            string json = await completion.Task;
+            var reply = JsonUtility.FromJson<VMDSelectionReply>(json);
+            if (reply == null) throw new FormatException("Empty selection reply.");
+            if (!string.IsNullOrEmpty(reply.error)) throw new InvalidOperationException(reply.error);
+            if (reply.atomCount < 1) throw new FormatException("Invalid selection reply.");
+            reply.indices ??= Array.Empty<int>();
+            return reply;
+        }
+        finally
+        {
+            SelectionResponseReceived -= Receive;
             if (completion.Task.IsFaulted) _ = completion.Task.Exception;
         }
     }
@@ -186,6 +231,14 @@ public class VMDClient : MonoBehaviour
                             Debug.LogError($"[VMDClient] {ConnectionError}", this);
                             break;
                         }
+                        continue;
+                    }
+
+                    // Checked first: an older bridge's "Unknown command 'SELECT'" must not reach trajectory requests.
+                    if (response.StartsWith("SELJSON ", StringComparison.Ordinal) ||
+                        (response.StartsWith("ERROR ", StringComparison.Ordinal) && response.Contains("'SELECT'")))
+                    {
+                        SelectionResponseReceived?.Invoke(response);
                         continue;
                     }
 

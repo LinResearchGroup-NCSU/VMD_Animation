@@ -44,8 +44,12 @@ public sealed class VMDCoordinateScene : MonoBehaviour
     private Matrix4x4 view = Matrix4x4.identity;
     private float radiusScale = 1;
     private float[] positions;
+    // Atom and original color of every sphere and half-bond instance, in batch order, for highlighting.
+    private int[] sphereAtoms, cylinderAtoms;
+    private Vector4[] sphereColors, cylinderColors;
     public Bounds WorldBounds { get; private set; }
     public bool HasFrame => positions != null;
+    public int AtomCount => metadata?.atomCount ?? 0;
     public int AtomInstanceCount { get; private set; }
     public int BondInstanceCount { get; private set; }
 
@@ -78,6 +82,8 @@ public sealed class VMDCoordinateScene : MonoBehaviour
         }
         Allocate(spheres, AtomInstanceCount);
         Allocate(cylinders, BondInstanceCount);
+        sphereAtoms = new int[AtomInstanceCount]; sphereColors = new Vector4[AtomInstanceCount];
+        cylinderAtoms = new int[BondInstanceCount]; cylinderColors = new Vector4[BondInstanceCount];
         int si = 0, bi = 0;
         foreach (var rep in source.reps)
         {
@@ -86,15 +92,32 @@ public sealed class VMDCoordinateScene : MonoBehaviour
             {
                 var color = new Vector4(rep.colors[i*3], rep.colors[i*3+1], rep.colors[i*3+2], 1);
                 colorByAtom.Add(rep.indices[i], color);
+                sphereAtoms[si] = rep.indices[i]; sphereColors[si] = color;
                 spheres[si / 511].colors[si++ % 511] = color;
             }
             for (int i = 0; i < rep.bonds.Length; i++)
             {
+                cylinderAtoms[bi] = rep.bonds[i]; cylinderColors[bi] = colorByAtom[rep.bonds[i]];
                 cylinders[bi / 511].colors[bi++ % 511] = colorByAtom[rep.bonds[i]];
             }
         }
         foreach (var batch in spheres) batch.properties.SetVectorArray("_AtomColor", batch.colors);
         foreach (var batch in cylinders) batch.properties.SetVectorArray("_AtomColor", batch.colors);
+    }
+
+    // Mute every sphere and half-bond whose atom is not in 'selected'; null restores VMD's colors.
+    public void SetHighlight(bool[] selected, float dimming)
+    {
+        if (sphereAtoms == null) return;
+        Recolor(spheres, sphereAtoms, sphereColors, selected, dimming);
+        Recolor(cylinders, cylinderAtoms, cylinderColors, selected, dimming);
+    }
+    private static void Recolor(List<Batch> batches, int[] atoms, Vector4[] original, bool[] selected, float dimming)
+    {
+        for (int i = 0; i < atoms.Length; i++)
+            batches[i / 511].colors[i % 511] = VMDHighlightController.IsSelected(selected, atoms[i])
+                ? original[i] : (Vector4)VMDHighlightController.Dim(original[i], dimming);
+        foreach (var batch in batches) batch.properties.SetVectorArray("_AtomColor", batch.colors);
     }
 
     private static void Allocate(List<Batch> batches, int count)

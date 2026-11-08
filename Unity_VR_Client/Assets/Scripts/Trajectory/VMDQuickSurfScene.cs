@@ -39,6 +39,7 @@ public sealed class VMDQuickSurfScene : MonoBehaviour
         public bool hasFront, hasPending, inFlight, truncated;
         public float[] building, queued;
         public float spacing;
+        public Vector3[] colors; // VMD's per-atom colors, restored when the highlight is cleared.
         public readonly MaterialPropertyBlock properties = new MaterialPropertyBlock();
     }
 
@@ -51,8 +52,10 @@ public sealed class VMDQuickSurfScene : MonoBehaviour
     private float scale;
     private int atomCount;
     private bool centered, released;
+    private float[] lastPositions;
 
     public int SurfaceCount => surfaces.Count;
+    public int AtomCount => atomCount;
     public int TriangleCount { get { int n = 0; foreach (var s in surfaces) if (s.hasFront) n += s.frontTriangles; return n; } }
     public bool IsBuilding { get { foreach (var s in surfaces) if (s.inFlight) return true; return false; } }
     public bool HasBounds { get { foreach (var s in surfaces) if (s.hasFront || s.hasPending) return true; return false; } }
@@ -107,13 +110,14 @@ public sealed class VMDQuickSurfScene : MonoBehaviour
             Validate(rep);
             if (rep.indices.Length == 0) continue;
             float limit = GaussianLimit[Mathf.Clamp(rep.quality, 0, GaussianLimit.Length - 1)];
-            var surface = new Surface { rep = rep, atoms = new GpuAtom[rep.indices.Length] };
+            var surface = new Surface { rep = rep, atoms = new GpuAtom[rep.indices.Length], colors = new Vector3[rep.indices.Length] };
             for (int i = 0; i < rep.indices.Length; i++)
             {
                 float sigma = Mathf.Max(rep.radii[i] * rep.radiusScale, 0.1f);
                 surface.atoms[i].invTwoSigma2 = 1f / (2f * sigma * sigma);
                 surface.atoms[i].cutoff = limit * sigma;
-                surface.atoms[i].color = new Vector3(rep.colors[i*3], rep.colors[i*3+1], rep.colors[i*3+2]);
+                surface.colors[i] = new Vector3(rep.colors[i*3], rep.colors[i*3+1], rep.colors[i*3+2]);
+                surface.atoms[i].color = surface.colors[i];
             }
             surface.atomBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, rep.indices.Length, AtomStride);
             surface.counter = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 4);
@@ -146,10 +150,32 @@ public sealed class VMDQuickSurfScene : MonoBehaviour
             rawToLocal = Matrix4x4.Scale(Vector3.one*scale) * Matrix4x4.Translate(-center) * Matrix4x4.Scale(new Vector3(1,1,-1)) * view;
             centered = true;
         }
+        lastPositions = positions;
         foreach (var surface in surfaces)
         {
             if (surface.inFlight) surface.queued = positions;
             else Build(surface, positions);
+        }
+    }
+
+    // Mute atoms outside 'selected' in the surface colors (null restores VMD's colors), then rebuild
+    // the current frame so the change also shows while playback is paused.
+    public void SetHighlight(bool[] selected, float dimming)
+    {
+        if (released) return;
+        foreach (var s in surfaces)
+        {
+            for (int i = 0; i < s.atoms.Length; i++)
+            {
+                Color original = new Color(s.colors[i].x, s.colors[i].y, s.colors[i].z, 1);
+                Color color = VMDHighlightController.IsSelected(selected, s.rep.indices[i])
+                    ? original : VMDHighlightController.Dim(original, dimming);
+                s.atoms[i].color = new Vector3(color.r, color.g, color.b);
+            }
+            float[] current = s.queued ?? s.building ?? lastPositions;
+            if (current == null) continue; // No frame yet; the first build uses the new colors.
+            if (s.inFlight) s.queued = current;
+            else Build(s, current);
         }
     }
 

@@ -27,6 +27,13 @@ public sealed class VMDCartoonScene : MonoBehaviour
     private int atomCount;
     private bool centered;
     public int StripCount => strips.Count;
+    public int AtomCount => atomCount;
+
+    // Mute every residue whose CA atom is not in 'selected'; null restores VMD's colors.
+    public void SetHighlight(bool[] selected, float dimming)
+    {
+        foreach (var strip in strips) strip.SetColors(selected, dimming);
+    }
 
     public void Initialize(VMDTrajectoryReply metadata, float coordinateScale)
     {
@@ -141,23 +148,32 @@ public sealed class VMDCartoonScene : MonoBehaviour
             triangles = new int[((rings-1)*sides*2+sides*2)*3];
             cos = new float[sides]; sin = new float[sides];
             for (int j = 0; j < sides; j++) { cos[j] = Mathf.Cos(j*2*Mathf.PI/sides); sin[j] = Mathf.Sin(j*2*Mathf.PI/sides); }
-            var colors = new Color[vertices.Length];
-            for (int ring = 0; ring < rings; ring++)
-            {
-                int a = Math.Min(ring/steps,n-2);
-                float t = (ring-a*steps)/(float)steps;
-                Color c = Color.Lerp(ColorAt(a),ColorAt(a+1),t);
-                for (int j = 0; j < sides; j++) colors[ring*sides+j] = c;
-            }
-            colors[colors.Length-2] = ColorAt(0); colors[colors.Length-1] = ColorAt(n-1);
             mesh = new Mesh { name = "Live NewCartoon ribbon", indexFormat = vertices.Length > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16 };
-            mesh.MarkDynamic(); mesh.vertices = vertices; mesh.colors = colors;
+            mesh.MarkDynamic(); mesh.vertices = vertices; mesh.colors = Colors(null, 0);
             owner.AddComponent<MeshFilter>().sharedMesh = mesh;
             var renderer = owner.AddComponent<MeshRenderer>(); renderer.sharedMaterial = material;
             renderer.shadowCastingMode = ShadowCastingMode.Off;
             renderer.receiveShadows = false;
         }
         private Color ColorAt(int i) => new Color(chain.colors[3*i],chain.colors[3*i+1],chain.colors[3*i+2],1);
+        public void SetColors(bool[] selected, float dimming) => mesh.colors = Colors(selected, dimming);
+        // Per-vertex residue colors, blended along the strip; residues outside 'selected' are muted.
+        private Color[] Colors(bool[] selected, float dimming)
+        {
+            int n = points.Length;
+            Color Residue(int i) => VMDHighlightController.IsSelected(selected, chain.indices[i])
+                ? ColorAt(i) : VMDHighlightController.Dim(ColorAt(i), dimming);
+            var colors = new Color[vertices.Length];
+            for (int ring = 0; ring < rings; ring++)
+            {
+                int a = Math.Min(ring/steps,n-2);
+                float t = (ring-a*steps)/(float)steps;
+                Color c = Color.Lerp(Residue(a),Residue(a+1),t);
+                for (int j = 0; j < sides; j++) colors[ring*sides+j] = c;
+            }
+            colors[colors.Length-2] = Residue(0); colors[colors.Length-1] = Residue(n-1);
+            return colors;
+        }
 
         public void Update(float[] coordinates, VMDCartoonScene owner)
         {
