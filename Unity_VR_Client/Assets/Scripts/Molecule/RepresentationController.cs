@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -254,7 +255,22 @@ public class RepresentationController : MonoBehaviour
     {
         int current = Array.IndexOf(SupportedMethods, currentDrawingMethod);
         int next = current < 0 ? 0 : (current + direction + SupportedMethods.Length) % SupportedMethods.Length;
-        SetRepresentation(SupportedMethods[next]);
+        // In the coordinate route switch every visible rep together, e.g. all three MutL domains;
+        // the configured index may be a hidden rep such as the default Lines.
+        if (CoordinateOwnsDisplay && !IsBusy && client != null && client.IsConnected)
+        {
+            List<int> visible = trajectory.DisplayedRepresentationIds();
+            if (visible.Count > 0)
+            {
+                Debug.Log($"[RepresentationController] {currentDrawingMethod} -> {SupportedMethods[next]} for reps {string.Join(", ", visible)}.", this);
+                trajectory.ChangeRepresentations(visible, SupportedMethods[next]);
+                return;
+            }
+        }
+        if (!SetRepresentation(representationIndex, SupportedMethods[next]))
+            Debug.LogWarning($"[RepresentationController] '{name}' cannot switch to {SupportedMethods[next]} now " +
+                             $"(client: {(client != null ? client.name : "none")}, connected: {client != null && client.IsConnected}, " +
+                             $"trajectory: {(trajectory != null ? trajectory.name : "none")}, busy: {IsBusy}, live route: {CoordinateOwnsDisplay}).", this);
     }
 
     // Send an export-producing command tagged with a new unique request ID so its reply can be

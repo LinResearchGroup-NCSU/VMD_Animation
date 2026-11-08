@@ -26,12 +26,17 @@ public class TrajectoryController : MonoBehaviour
     private bool busy, isPlaying, waitingForCoordinates, wasConnected;
     private int generation, currentFrame, targetFrame, syncFrame = -1, lastVmdFrame, capacity;
     private int requestedSeek = -1, pendingStep;
+    // VMD redraws on every TRAJ_SYNC, which blocks further reads; while the user keeps stepping,
+    // sync only once the displayed frame has settled for this long.
+    private const float SyncDelay = 0.3f;
+    private float syncNotBefore;
     private int retainedMolecule = -1, retainedFrame = -1;
     private float nextStepTime, requestTime, nextCheck;
     // Fallback reason or last error, shown on the status bar's second line.
     private string note = "", repSummary = "";
     public bool IsWaitingForCoordinates => waitingForCoordinates || (OwnsDisplay && (scene == null || !scene.HasFrame || targetFrame != currentFrame));
     public bool IsPlaying => isPlaying;
+    public bool IsConnected => subscribedClient != null && subscribedClient.IsConnected;
     public int CurrentFrame => currentFrame;
     public int FrameCount => metadata?.frameCount ?? 0;
     public int BufferedFrameCount => frames.Count;
@@ -135,7 +140,7 @@ public class TrajectoryController : MonoBehaviour
                 currentFrame = targetFrame;
                 if (first) representationController?.SetCoordinateDisplay(true, DisplayedMethod());
                 if (first) representationController?.FitView();
-                if (!isPlaying) syncFrame = currentFrame;
+                if (!isPlaying) { syncFrame = currentFrame; syncNotBefore = Time.unscaledTime + SyncDelay; }
                 nextStepTime = Time.unscaledTime + stepInterval;
             }
             catch (Exception error) { Fail(error); return; }
@@ -146,7 +151,7 @@ public class TrajectoryController : MonoBehaviour
             else targetFrame = currentFrame + 1;
         }
         if (busy) return;
-        if (syncFrame >= 0 && currentFrame >= 0)
+        if (syncFrame >= 0 && currentFrame >= 0 && Time.unscaledTime >= syncNotBefore)
         {
             int frameToSync = syncFrame;
             syncFrame = -1;
@@ -230,7 +235,7 @@ public class TrajectoryController : MonoBehaviour
     public void Pause()
     {
         isPlaying = false;
-        if (route == Route.Coordinates && currentFrame >= 0) { targetFrame = currentFrame; syncFrame = currentFrame; }
+        if (route == Route.Coordinates && currentFrame >= 0) { targetFrame = currentFrame; syncFrame = currentFrame; syncNotBefore = Time.unscaledTime + SyncDelay; }
         else if (!waitingForCoordinates) SetRepresentationPlayback(false);
     }
     public void Toggle() { if (isPlaying) Pause(); else Play(); }
@@ -262,15 +267,32 @@ public class TrajectoryController : MonoBehaviour
         ResetCoordinates();
         retainedMolecule = oldMolecule; retainedFrame = oldFrame;
     }
-    public void ChangeRepresentation(int index, string method)
+    public void ChangeRepresentation(int index, string method) => ChangeRepresentations(new[] { index }, method);
+    // Apply one drawing method to several VMD reps, e.g. every visible one, then reload once.
+    public void ChangeRepresentations(IReadOnlyList<int> indices, string method)
     {
         Pause();
         RefreshCoordinates();
         Run(async (token, version) =>
         {
-            await subscribedClient.RequestTrajectory("TRAJ_STYLE " + index + " " + method, token);
-            if (version == generation) await Open(token, version);
+            foreach (int index in indices)
+            {
+                await subscribedClient.RequestTrajectory("TRAJ_STYLE " + index + " " + method, token);
+                if (version != generation) return;
+            }
+            await Open(token, version);
         });
+    }
+    // VMD rep indices drawn by the coordinate route, in VMD order; empty until its metadata is loaded.
+    public List<int> DisplayedRepresentationIds()
+    {
+        var ids = new List<int>();
+        if (metadata == null) return ids;
+        foreach (var rep in metadata.reps) ids.Add(rep.id);
+        if (metadata.cartoons != null) foreach (var cartoon in metadata.cartoons) ids.Add(cartoon.id);
+        if (metadata.quicksurfs != null) foreach (var surface in metadata.quicksurfs) ids.Add(surface.id);
+        ids.Sort();
+        return ids;
     }
     // Explicit OBJ/atom-view menu actions retain their meaning until a style change.
     public void UseExplicitStaticView()
