@@ -134,7 +134,7 @@ You can see the example movie here: [MutLα](https://youtu.be/FPb0yXllI84)
 
 ## VMD and Unity viewer
 
-The repository contains an experimental local bridge between VMD and a Unity client. VMD supplies molecular data, representation settings and coordinate snapshots. Unity controls coordinate playback and its own camera; pause and seek synchronize the displayed frame back to VMD. Compatible scenes render directly in Unity, while other scenes use exported VMD meshes. Headset input is not implemented yet.
+The repository contains an experimental local bridge between VMD and a Unity client. VMD supplies molecular data, representation settings and coordinate snapshots. Unity controls coordinate playback and its own camera; pause and seek synchronize the displayed frame back to VMD. Compatible scenes render directly in Unity, while other scenes use exported VMD meshes. The client runs on the desktop, in the XR Interaction Simulator, or in an OpenXR headset connected to the same computer; see [XR modes](#xr-modes). Headset rendering has not yet been validated on a device.
 
 ### Extension folders
 
@@ -200,6 +200,7 @@ The current command protocol supports:
 | `FRAME <index>` | Move to an exact trajectory frame. |
 | `STEP <delta>` | Move forward or backward by a number of frames, clamped to the valid range. |
 | `HIGHLIGHT <selection>` | Highlight `N_DOMAIN`, `C_DOMAIN`, or `LINKER`; use `ALL` to clear the added highlight representation. |
+| `SELECT <requestId> <selection>` | Resolve a selection name or VMD selection text on the top molecule to atom indices, without changing VMD. Replies `SELJSON {"requestId":…,"atomCount":…,"label":…,"indices":[…]}`, or `SELJSON` with `"error"`. |
 | `GET_COORDS` | Return the current top molecule's atom coordinates. |
 | `GET_SCENE_STATE` | Return the scene signature used to detect representation, visibility and frame changes. |
 | `EXPORT_SCENE <requestId>` | Export the visible VMD scene to OBJ/MTL and return its local path. |
@@ -216,7 +217,7 @@ The current command protocol supports:
 
 When a client connects, the bridge sends `READY VMD_VR_BRIDGE <protocolVersion>` (currently 1) followed by the current `STATE` (or an error if no molecule is loaded). State messages include the top molecule ID, current frame, total frame count, and VMD rotation, center, scale, and global matrices. Unity reads the frame and frame count from this message; it does not apply these broadcast matrices to its camera. Trajectory metadata and mesh bindings carry their own geometry transforms.
 
-`VMD_VR_Bridge/_test_bridge.tcl` provides regression coverage for command validation, the `HELLO` handshake, port configuration, frame control and clamping, domain highlighting, TCP connection handling, and state broadcasts. Generated test reports are ignored by Git.
+`VMD_VR_Bridge/_test_bridge.tcl` provides regression coverage for command validation, the `HELLO` handshake, port configuration, `SELECT` and named selections, frame control and clamping, domain highlighting, TCP connection handling, and state broadcasts. Generated test reports are ignored by Git.
 
 ### Unity client
 
@@ -228,7 +229,11 @@ Current scripts under `Assets/Scripts/`:
 | --- | --- |
 | `VMD/VMDClient.cs` | TCP connection, commands, coordinate/state parsing, static-scene forwarding and cancellable trajectory requests matched by request ID. |
 | `VMD/VMDKeyboardController.cs` | Desktop frame and trajectory-playback key bindings. |
-| `VMD/VMDVRController.cs` | Placeholder for future headset/controller input. |
+| `VMD/VMDVRController.cs` | XR controller face buttons and thumbsticks: play/pause, frame steps, drawing method, recenter. See [XR controls](#xr-controls). |
+| `XR/VMDXRBootstrap.cs` | Chooses Desktop, Simulator or Headset mode at startup, enables the matching camera rig, and fits the molecule in front of the user. |
+| `XR/VMDMoleculeGrab.cs` | Grip grabbing: one hand moves and rotates the molecule, two hands also scale it. |
+| `XR/VMDStatusPanel.cs` | World-space Play/Pause, Previous and Next panel above the left controller, pressed with a controller ray. |
+| `Highlight/VMDHighlightController.cs` | Highlights a VMD selection by muting every other atom's color in the live renderers, without changing VMD. |
 | `Molecule/MoleculeRenderer.cs` | Original atom objects, coordinate updates, automatic centering and atom scale; initializes the representation controller. |
 | `Molecule/RepresentationController.cs` | Static export requests, representation-switch commands, loading and switching between static and coordinate views. |
 | `Representations/VMDObjLoader.cs` | Generic OBJ/MTL parsing, coordinate-handedness conversion and mesh chunking. |
@@ -287,10 +292,81 @@ Focus the Game view while in Play mode:
 | Right or middle mouse drag | Pan. |
 | Mouse wheel | Zoom. |
 | F | Fit the complete visible molecule. |
+| H | Highlight the next domain: `N_DOMAIN` → `C_DOMAIN` → `LINKER` → off. See [Highlighting](#highlighting). |
 
 In Simulator mode the XR Interaction Simulator also reads Space, the arrow keys, digits, P and H, so only Enter / Numpad Enter (toggle Play/Pause) and , / . (previous / next frame) are active there.
 
-The Game view also provides Play/Pause, Previous and Next buttons. Keyboard, UI and future XR controls share `TrajectoryController`. The existing H binding still sends `HIGHLIGHT` without its required selection argument and is not a working highlight shortcut.
+### XR modes
+
+`VMDXRBootstrap` chooses one mode when Play mode or a player starts:
+
+| Mode | When | Camera |
+| --- | --- | --- |
+| Simulator | In the Editor while **Simulate In Editor** is checked on the `VMDXRBootstrap` component (the default). | XR Origin driven by the XR Interaction Simulator. |
+| Headset | Otherwise, when an OpenXR runtime and headset start. Uncheck **Simulate In Editor** to use a headset from the Editor. | XR Origin tracked by the headset. |
+| Desktop | No OpenXR runtime or headset, or a built player started with `-desktop`. | The desktop camera and [desktop controls](#desktop-controls). |
+
+XR Plug-in Management does not initialize XR on startup, so a missing runtime never blocks Play mode; the bootstrap falls back to Desktop and logs the chosen mode. In Simulator and Headset modes the molecule is scaled to a 0.4 m radius and placed 1.3 m above and 0.8 m in front of the XR Origin, and refitted whenever it reappears, for example after a reconnect. Both values are fields on the component.
+
+**Headset connection.** The bridge listens only on `127.0.0.1` and exports meshes through local files, so the headset must run as a PC VR display of the computer running VMD (for example Quest Link, Air Link or SteamVR). A standalone headset app cannot reach the bridge.
+
+**Stereo rendering.** The OpenXR runtime supplies each eye's view and projection, distortion correction and frame timing; Unity renders both eyes into one texture array (OpenXR render mode **Single Pass Instanced**). Every custom shader must therefore carry Unity's stereo-instancing macros (`UNITY_VERTEX_INPUT_INSTANCE_ID`, `UNITY_VERTEX_OUTPUT_STEREO`, `UNITY_SETUP_INSTANCE_ID`, `UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO`, and `UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX` in the fragment shader, which also selects the per-eye `_WorldSpaceCameraPos`); without them the geometry appears in only one eye. The four shaders under `Assets/Resources/` carry them. To rule out a shader problem, switch the render mode to **Multi-pass** under **Project Settings → XR Plug-in Management → OpenXR**, which renders each eye separately at roughly twice the GPU cost.
+
+### XR controls
+
+In Simulator and Headset modes, hold a controller's grip button on the molecule, up close or by pointing its ray, to move and rotate it; hold both grips to scale it as well. A molecule grabbed from a distance stays at that distance. The grab volume is a sphere around the molecule's current bounds, so grabbing just outside the atoms also works.
+
+`VMDVRController` maps the remaining buttons; it uses OpenXR usages, so Quest Touch, Index, Vive and the XR Interaction Simulator share one mapping:
+
+| Input | Action |
+| --- | --- |
+| Right A (primary button) | Play / Pause. |
+| Right B (secondary button) | Next drawing method (VDW → CPK → QuickSurf → NewCartoon) for every visible representation, keeping their selections and colors. |
+| Right thumbstick left / right | Previous / next frame; repeats while held. Ignored while the molecule is grabbed. |
+| Left X / Y | Back / forward 100 frames. |
+| Left thumbstick click | Recenter: restore the initial orientation, size and position in front of the user. |
+
+The controller ray only points; grip (grab) and trigger (UI) act on what it points at. The face buttons and thumbsticks above work wherever the ray points.
+
+A status panel floats 10 cm above the left controller, parallel to the view plane. It copies the desktop panel's layout: Play/Pause, Previous and Next buttons above the same two status lines. Point the right controller's ray at a button and pull the trigger; like the desktop buttons, they work only while VMD is connected. In XR modes the scene's EventSystem uses `XRUIInputModule` instead of `InputSystemUIInputModule`; desktop mode is unchanged.
+
+#### Testing with the XR Interaction Simulator
+
+Controller buttons and the thumbstick go to the right controller; hold Shift to send them to the left controller instead. `]`, `[` and `H` only choose which device W/A/S/D, Q/E, the arrow keys and the mouse move and rotate; they do not choose which hand receives button presses.
+
+| Controller input | Simulator keys | Action |
+| --- | --- | --- |
+| Right A | 1 | Play / Pause. |
+| Right B | 2 | Next drawing method. |
+| Right thumbstick left / right | J / L | Previous / next frame; repeats while held. |
+| Right grip | G | Grab the molecule the ray points at. |
+| Right trigger | T | Press the status-panel button the ray points at. |
+| Left X | Shift + 1 | Back 100 frames. |
+| Left Y | Shift + 2 | Forward 100 frames. |
+| Left thumbstick click | Shift + 3 | Recenter the molecule. |
+| Left grip | Shift + G | Grab with the left hand; with both grips held, scale. |
+
+These keys come from the simulator sample's `XR Interaction Controller Controls` input actions; the simulator's on-screen panel shows the current bindings.
+
+The Game view also provides Play/Pause, Previous and Next buttons. Keyboard, UI and future XR controls share `TrajectoryController`.
+
+### Highlighting
+
+`VMDHighlightController` highlights a selection without changing anything in VMD. It sends `SELECT <requestId> <selection>`; the bridge resolves the selection on the top molecule to atom indices, and Unity mutes the color of every other atom in the live VDW, CPK, NewCartoon and QuickSurf renderers. Selected atoms keep VMD's colors. Because VMD's representations and the trajectory snapshot are untouched, nothing reloads: playback, frame synchronization and the XR placement of the molecule are unaffected. Turning the highlight off restores VMD's exact colors.
+
+- In desktop mode, H cycles through the controller's **Selections** list (default `N_DOMAIN`, `C_DOMAIN`, `LINKER`), then off. The component is added to the VMDClient object at runtime when the scene has none; add it in the Inspector to change the list or the **Dimming** strength.
+- A list entry is either a bridge selection name or any VMD selection text, such as `chain A and resid 100 to 200`.
+- The highlight follows representation changes made in VMD and is cleared when the connection to VMD drops, since VMD may serve another molecule afterwards.
+- Representations drawn from exported VMD meshes (other drawing methods) are not highlighted.
+- The older `HIGHLIGHT` command, which adds a VDW representation in VMD, is unchanged; Unity no longer uses it.
+
+Selection names are defined in the bridge. To highlight domains of another structure, define them in VMD after sourcing `start_vr.tcl`, then add the names to the controller's list:
+
+```tcl
+::vrbridge::define_selection MY_DOMAIN {chain A and resid 10 to 120}
+```
+
+Names are case-insensitive letters, digits and underscores. They survive reloading the bridge, except names that redefine the built-in `N_DOMAIN`, `C_DOMAIN` or `LINKER`. With a bridge older than `SELECT`, highlighting reports that the bridge must be reloaded and everything else keeps working.
 
 ### Static representations: VMD export → Unity display
 
@@ -302,7 +378,7 @@ VMD representation settings → VMD Wavefront OBJ/MTL export
 
 After initial coordinates arrive, `TrajectoryController` checks whether the scene supports coordinate playback. Compatible scenes prepare automatically without OBJ export. The coordinate route checks snapshot validity after filling its buffer, with checks scheduled at 0.75-second intervals; representation changes reopen the snapshot. The VMD mesh route polls the scene signature every 0.5 seconds while paused, coalesces changes, and refreshes exported geometry after the export cooldown. Camera-only changes do not trigger an export. For a manual export, pause playback and use **Export current VMD scene** or call `RefreshFromVMD()`.
 
-For future keyboard, UI or headset bindings, call `SetVDW()`, `SetCPK()`, `SetQuickSurf()`, `SetNewCartoon()`, `NextRepresentation()` or `PreviousRepresentation()`. `SetRepresentation(int repIndex, string method)` targets a specific representation on VMD's top molecule. These calls change the drawing method in VMD and select coordinate playback for compatible VDW/CPK/protein NewCartoon/QuickSurf scenes; other scenes use the VMD mesh path. Style changes pause playback and retain the displayed frame for the same molecule. No XR input bindings are installed. Switching methods applies that method's default parameters while preserving selection, coloring, material and visibility.
+For new keyboard, UI or XR bindings, call `SetVDW()`, `SetCPK()`, `SetQuickSurf()`, `SetNewCartoon()`, `NextRepresentation()` or `PreviousRepresentation()`. `SetRepresentation(int repIndex, string method)` targets a specific representation on VMD's top molecule. These calls change the drawing method in VMD and select coordinate playback for compatible VDW/CPK/protein NewCartoon/QuickSurf scenes; other scenes use the VMD mesh path. Style changes pause playback and retain the displayed frame for the same molecule. In XR, Right B calls `NextRepresentation()`. Switching methods applies that method's default parameters while preserving selection, coloring, material and visibility.
 
 To import a saved export, set `Local Obj Path` and use **Load local VMD OBJ**, keeping the referenced MTL file alongside the OBJ. Keep `scene.binding` alongside bridge exports if coordinate-driven mesh playback is needed; older OBJ/MTL pairs remain loadable as static geometry. **Return to coordinate view** restores the original atom view. Explicit export/import and atom-view actions leave automatic coordinate rendering until a style change.
 
@@ -316,7 +392,7 @@ Current behavior and limitations:
 - The Unity NewCartoon coordinate renderer supports CA-only amino-acid models as smooth coils without STRIDE. VMD Wavefront export may still produce empty NewCartoon geometry for CA-only data; use the live route or a complete-backbone structure where appropriate.
 - Compatible coordinate scenes require one visible top molecule, supported drawing/color methods, opaque materials and fixed selections. Unsupported visible reps, multiple visible molecules, dynamic selections/colors, periodic images and smoothing select the VMD mesh route. QuickSurf also requires compute shaders. In-place coordinate, radius or bond edits not reflected in scene settings require restarting Play mode.
 - The coordinate buffer defaults to 24 frames and targets 64 MiB of positions, with a minimum of two frames (one for a single-frame molecule). This excludes metadata, rendering buffers and parsing allocations. Requests contain at most four frames, reduced for large molecules. QuickSurf uses a bounded GPU grid and may coarsen its spacing; its surface can lag the displayed coordinate frame.
-- Headset input, OpenXR/Meta Quest integration, atom-picking metadata and cross-computer mesh transfer remain outside this phase.
+- Validation on a headset, standalone (untethered) headset apps, highlighting from XR controllers, atom-picking metadata and cross-computer mesh transfer remain outside this phase.
 
 ### Validation
 
