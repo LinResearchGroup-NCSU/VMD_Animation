@@ -1,3 +1,6 @@
+// Draws the ribbon meshes built by VMDCartoonScene (NewCartoon on the coordinate route).
+// The vertex color is the residue color, and lighting comes from VMDLighting.cginc. Both
+// faces are drawn; back faces are lit with the normal turned around.
 Shader "VMD/NewCartoon"
 {
     SubShader
@@ -14,6 +17,8 @@ Shader "VMD/NewCartoon"
             #pragma multi_compile_instancing
             #include "UnityCG.cginc"
             #include "VMDLighting.cginc"
+            // The instance ID and the stereo macros serve Single Pass
+            // Instanced XR rendering (README, "Stereo rendering").
             struct Input { float4 vertex : POSITION; float3 normal : NORMAL; float4 color : COLOR; UNITY_VERTEX_INPUT_INSTANCE_ID };
             struct Output { float4 vertex : SV_POSITION; float3 normal : TEXCOORD0; float3 world : TEXCOORD1; float4 color : COLOR; UNITY_VERTEX_OUTPUT_STEREO };
             Output vert(Input v)
@@ -31,6 +36,8 @@ Shader "VMD/NewCartoon"
             float4 frag(Output i, fixed facing : VFACE) : SV_Target
             {
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
+                // VFACE is negative on back faces; turn the
+                // normal so that both sides are lit alike.
                 float3 n = normalize(i.normal)*(facing >= 0 ? 1 : -1);
                 return float4(VMDLighting(i.color.rgb,n,i.world),1);
             }

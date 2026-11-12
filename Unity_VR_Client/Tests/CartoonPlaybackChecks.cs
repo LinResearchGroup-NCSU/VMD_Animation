@@ -1,4 +1,29 @@
+// Editor check of NewCartoon on the coordinate ("Unity live") route: VMDCartoonScene's geometry
+// and its playback through TrajectoryController, without VMD, a TCP connection or Play mode.
 // Uses real VMD metadata/frame fixtures from _test_cartoon.tcl in an isolated Editor project.
+//
+// Two parts:
+// - GeometryChecks drives a VMDCartoonScene directly: one mesh per chain, mesh reuse between
+//   frames, rebuilt positions and normals, fixed topology, identical geometry on returning to a
+//   frame, removal of faces across a backbone jump, no NaN for a degenerate backbone, release
+//   on teardown, and the selection, B-spline and mixed VDW/cartoon fixtures.
+// - Run then plays the trajectory against a fake bridge, set up as in CoordinatePlaybackChecks:
+//   the client gets a writer over a memory stream, and Tick answers each TRAJ_* command from the
+//   fixtures. It checks Play / Pause / Seek / Next / Previous, that no EXPORT_, STEP or FRAME
+//   command is sent, and the switch from NewCartoon to QuickSurf.
+//
+// Fixtures: cartoon.json, cartoon-frames.json, cartoon-selection.json, cartoon-bspline.json and
+// cartoon-mixed.json, written by VMD_VR_Bridge/_test_cartoon.tcl into the folder named by
+// VMD_COORDINATE_TEST_ROOT. They are read by bare file name, so they must be in the Editor's
+// current directory.
+//
+// This folder is outside Assets, so the main project does not compile this file. Copy it into an
+// isolated Unity project's Assets/Editor alongside the runtime scripts.
+// Run: -batchmode -executeMethod CartoonPlaybackChecks.Run
+// With a graphics device it also renders the ribbon and writes cartoon-preview.png to the
+// current directory; with -nographics that step is skipped.
+// Each check logs "PASS <name>"; the Editor exits with code 0 when all passed, otherwise 1.
+// See COORDINATE_PLAYBACK.md, section Verification.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -12,23 +37,36 @@ using Object = UnityEngine.Object;
 
 public static class CartoonPlaybackChecks
 {
+    // For reaching private members of the runtime scripts through reflection.
     private static readonly BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
+    // The playback fixture: one object carrying the client, molecule and controllers.
     private static GameObject root;
     private static VMDClient client;
     private static TrajectoryController player;
+    // What the fake bridge answers: 'metadata' to TRAJ_OPEN, frames of 'frames' to TRAJ_READ.
     private static VMDTrajectoryReply metadata, frames;
+    // Everything the client has sent, and how many characters of it Tick has already answered.
     private static MemoryStream wire;
+    // remoteFrame is the fake VMD's displayed frame: set by TRAJ_SYNC, reported in every reply.
     private static int consumed, remoteFrame;
+    // While set, Tick makes the next playback step due at once.
     private static bool accelerate;
+    // An exception thrown inside Tick, rethrown by Until so that the run fails.
     private static Exception tickError;
+    // Every command line sent so far, for the check on what must never be sent.
     private static readonly List<string> commands = new List<string>();
+    // Throw on a failed check, which ends the run; log "PASS" otherwise.
     private static void Check(bool condition, string name)
     {
         if (!condition) throw new Exception("Failed: " + name);
         Debug.Log("PASS " + name);
     }
+    // Call a private parameterless method, such as a Unity message that the Editor does not send
+    // outside Play mode.
     private static void Invoke(object target, string method) => target.GetType().GetMethod(method,Private).Invoke(target,null);
+    // Load one JSON fixture.
     private static VMDTrajectoryReply Read(string path) => JsonUtility.FromJson<VMDTrajectoryReply>(File.ReadAllText(path));
+    // Wait until 'condition' holds. Fails after 20 s, or at once when Tick has thrown.
     private static async Task Until(Func<bool> condition)
     {
         DateTime end = DateTime.UtcNow.AddSeconds(20);
@@ -39,6 +77,9 @@ public static class CartoonPlaybackChecks
             await Task.Delay(10);
         }
     }
+    // One Editor update: run the controller's Update, then act as the bridge for the commands
+    // sent since the last call. Each TRAJ_* command gets a TRAJJSON reply, delivered to the
+    // client as if it had arrived over TCP; other commands are only recorded.
     private static void Tick()
     {
         try
@@ -62,6 +103,7 @@ public static class CartoonPlaybackChecks
                         reply.start = int.Parse(words[3]);
                         reply.frames = frames.frames.Skip(reply.start).Take(int.Parse(words[4])).ToArray(); break;
                     case "TRAJ_SYNC": remoteFrame = int.Parse(words[3]); break;
+                    // "TRAJ_STYLE <id> <repIndex> <method>": the next TRAJ_OPEN reports QuickSurf.
                     case "TRAJ_STYLE":
                         if (words[3] == "QuickSurf") metadata = SurfaceFrom(metadata);
                         break;
@@ -73,6 +115,8 @@ public static class CartoonPlaybackChecks
         catch (Exception error) { tickError = error; }
     }
     // What the bridge reports after TRAJ_STYLE switches the cartoon rep to QuickSurf.
+    // Built from the cartoon metadata: one QuickSurf rep over the atoms of the first cartoon's
+    // chains, with made-up radii and a single color, and no other reps.
     private static VMDTrajectoryReply SurfaceFrom(VMDTrajectoryReply source)
     {
         var copy = JsonUtility.FromJson<VMDTrajectoryReply>(JsonUtility.ToJson(source));
@@ -83,6 +127,7 @@ public static class CartoonPlaybackChecks
             indices = atoms, radii = atoms.Select(_=>1.7f).ToArray(), colors = atoms.SelectMany(_=>new[]{0.2f,0.6f,1f}).ToArray() } };
         return copy;
     }
+    // Checks on VMDCartoonScene alone, without the controller or the fake bridge; see the header.
     private static async Task GeometryChecks()
     {
         var test = new GameObject("Cartoon geometry fixture");
@@ -106,17 +151,21 @@ public static class CartoonPlaybackChecks
             // Let native MeshRenderers register before an offscreen Editor camera renders.
             await Task.Delay(100);
             Draw(test);
+            // Move one atom of the first chain 100 units along x, which breaks the backbone there.
             float[] jumped = (float[])frames.frames[0].positions.Clone();
             jumped[metadata.cartoons[0].chains[0].indices[5]*3] += 100;
             scene.Show(jumped);
             Check(!meshes[0].triangles.SequenceEqual(triangles),"periodic/backbone jump disables cross-gap faces");
             scene.Show(frames.frames[0].positions);
             Check(meshes[0].triangles.SequenceEqual(triangles),"backbone recovery restores topology");
+            // Every atom at the origin.
             scene.Show(new float[metadata.atomCount*3]);
             Check(meshes.All(m=>m.vertices.All(Finite) && m.normals.All(Finite)),"degenerate backbone does not produce NaN");
         }
         finally { test.GetComponent<VMDCartoonScene>()?.Clear(); Object.DestroyImmediate(test); }
         Check(meshes.All(m=>m == null),"teardown releases native cartoon meshes");
+        // Three more scenes from VMD, each expected to give two ribbon strips: a selection with a
+        // gap, a B-spline cartoon, and a cartoon combined with a VDW rep.
         foreach (string file in new[]{"cartoon-selection.json","cartoon-bspline.json","cartoon-mixed.json"})
         {
             var input = Read(file);
@@ -135,6 +184,9 @@ public static class CartoonPlaybackChecks
         }
     }
     private static bool Finite(Vector3 v) => !(float.IsNaN(v.x)||float.IsNaN(v.y)||float.IsNaN(v.z)||float.IsInfinity(v.x)||float.IsInfinity(v.y)||float.IsInfinity(v.z));
+    // Render the fixture's meshes into a 1024 x 512 texture with an orthographic camera, save
+    // it as cartoon-preview.png, and check that enough pixels are lit and that none has the
+    // magenta that Unity draws for a shader that failed. Skipped without a graphics device.
     private static void Draw(GameObject fixture)
     {
         if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null) return;
@@ -167,6 +219,8 @@ public static class CartoonPlaybackChecks
             Object.DestroyImmediate(target); Object.DestroyImmediate(image); Object.DestroyImmediate(cameraObject);
         }
     }
+    // Entry point for -executeMethod. Runs every check in order and stops at the first failure.
+    // It is asynchronous and ends the Editor itself, with exit code 0 only when all checks passed.
     public static async void Run()
     {
         int exit = 1;
@@ -176,10 +230,15 @@ public static class CartoonPlaybackChecks
             Check(metadata.supported && metadata.reps.Length == 0 && metadata.cartoons.Length == 1,"real VMD cartoon-only metadata parses");
             await GeometryChecks();
             root = new GameObject("Cartoon playback fixture"); client = root.AddComponent<VMDClient>();
+            // A non-null writer is what VMDClient.IsConnected tests, so this stands in for a
+            // completed handshake and captures everything the client sends.
             wire = new MemoryStream();
             typeof(VMDClient).GetField("writer",Private).SetValue(client,new StreamWriter(wire,new UTF8Encoding(false)){AutoFlush=true,NewLine="\n"});
+            // The controller opens the trajectory only once the client holds coordinates.
             var coordinates = (List<Vector3>)typeof(VMDClient).GetField("coordinates",Private).GetValue(client);
             for (int i = 0; i < metadata.atomCount; i++) coordinates.Add(Vector3.zero);
+            // The Editor does not send OnEnable outside Play mode. MoleculeRenderer's OnEnable
+            // also creates the RepresentationController and the TrajectoryController.
             var owner = root.AddComponent<MoleculeRenderer>(); Invoke(owner,"OnEnable");
             player = root.GetComponent<TrajectoryController>(); Invoke(player,"OnEnable");
             EditorApplication.update += Tick;
@@ -198,6 +257,8 @@ public static class CartoonPlaybackChecks
             Check(player.CurrentFrame==3,"continuous playback updates to final frame and pauses");
             player.Seek(1); await Until(()=>player.CurrentFrame==1);
             Check(!commands.Any(x=>x.StartsWith("EXPORT_") || x.StartsWith("STEP ") || x.StartsWith("FRAME ")),"cartoon play/step/seek/pause never exports OBJ or enters old mesh deformation");
+            // Reopen with the mixed fixture (a cartoon plus a two-atom VDW rep), then switch rep 0
+            // to QuickSurf.
             metadata = Read("cartoon-mixed.json");
             player.RefreshCoordinates();
             await Until(()=>root.GetComponentInChildren<VMDCoordinateScene>()?.AtomInstanceCount == 2 && !player.IsWaitingForCoordinates);

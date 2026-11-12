@@ -1,14 +1,25 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-// This component allows controlling VMD from the keyboard, for testing without a VR headset.
-
+// Keyboard bindings for trajectory playback and highlighting; Update lists the keys.
+//
+// The keys send nothing to VMD themselves. They call TrajectoryController, the playback
+// controller that the on-screen buttons, VMDVRController and VMDStatusPanel also use, and
+// VMDHighlightController.Cycle, which the status panel's Highlight button also calls.
+//
+// The component runs in every mode chosen by VMDXRBootstrap. Desktop and Headset modes use all
+// keys. Simulator mode uses only Enter and , / . because the XR Interaction Simulator reads the
+// other keys itself.
+//
 // Add this component to the same GameObject as VMDClient.
 [RequireComponent(typeof(VMDClient))]
 public class VMDKeyboardController : MonoBehaviour
 {
+    // Cached in Awake; the key handling below does not use it.
     private VMDClient client;
+    // Playback controller the keys act on. Found in Awake when not assigned in the Inspector.
     [SerializeField] private TrajectoryController trajectoryController;
+    // Target of the H key.
     private VMDHighlightController highlight;
 
     // Cache the VMDClient and locate a TrajectoryController (same GameObject first, then the scene).
@@ -25,9 +36,11 @@ public class VMDKeyboardController : MonoBehaviour
             highlight = gameObject.AddComponent<VMDHighlightController>();
     }
 
-    // Translate key presses into VMD commands: Enter / P play or pause trajectory playback,
-    // 1 / 2 / 3 jump to frames 100 / 500 / 1000, Left / Right or , / . step one frame,
-    // Space toggles the same playback controller used by desktop and XR buttons, H cycles the highlight.
+    // Translate key presses into TrajectoryController and highlight calls:
+    // - Enter / Numpad Enter: play. P: pause. Space: toggle play and pause.
+    // - Left / Right arrow, or , / .: step one frame back / forward.
+    // - 1 / 2 / 3: seek to frame 100 / 500 / 1000.
+    // - H: highlight the next selection (VMDHighlightController.Cycle).
     // The XR Interaction Simulator also reads Space, the arrows, digits, P and H, so in Simulator
     // mode only keys it leaves free are used: Enter toggles playback, , / . step one frame.
     private void Update()
@@ -36,11 +49,13 @@ public class VMDKeyboardController : MonoBehaviour
         if (keyboard == null)
             return;
 
+        // , and . are handled before the mode check, so they work in every mode.
         if (keyboard.commaKey.wasPressedThisFrame)
             trajectoryController?.Step(-1);
         if (keyboard.periodKey.wasPressedThisFrame)
             trajectoryController?.Step(1);
 
+        // Simulator mode: Enter toggles play and pause, and the keys below are skipped.
         if (VMDXRBootstrap.ActiveMode == VMDXRBootstrap.Mode.Simulator)
         {
             if (keyboard.enterKey.wasPressedThisFrame || keyboard.numpadEnterKey.wasPressedThisFrame)
@@ -56,8 +71,6 @@ public class VMDKeyboardController : MonoBehaviour
                 trajectoryController.Pause();
         }
 
-        // One command per press, rather than repeating every frame while held.
-        // TODO: Add more commands for controlling VMD, e.g. changing representations, coloring, etc.
         if (keyboard.digit1Key.wasPressedThisFrame)
             trajectoryController?.Seek(100);
         if (keyboard.digit2Key.wasPressedThisFrame)
@@ -70,7 +83,8 @@ public class VMDKeyboardController : MonoBehaviour
             trajectoryController?.Step(1);
         if (keyboard.spaceKey.wasPressedThisFrame)
             trajectoryController?.Toggle();
-        // H cycles N_DOMAIN -> C_DOMAIN -> LINKER -> off; desktop mode only (the simulator reads H).
+        // H cycles through the highlight controller's selections (by default N_DOMAIN, C_DOMAIN,
+        // LINKER), then off. Desktop and Headset modes only: the simulator reads H itself.
         if (keyboard.hKey.wasPressedThisFrame)
             highlight?.Cycle();
     }

@@ -1,3 +1,9 @@
+// Draws the QuickSurf triangles that VMDQuickSurfGrid.compute writes into a GPU buffer,
+// for VMDQuickSurfScene (QuickSurf on the coordinate route). There is no mesh: the
+// script draws with Graphics.RenderPrimitives, and the vertex shader reads position,
+// normal and color from _Vertices by vertex index. _RawToWorld and _RawToWorldNormal,
+// set by the script every frame, take positions and normals from VMD coordinates to
+// world space. Both faces are drawn, and lighting comes from VMDLighting.cginc.
 Shader "VMD/QuickSurf"
 {
     SubShader
@@ -30,6 +36,8 @@ Shader "VMD/QuickSurf"
                 o.world = mul(_RawToWorld, float4(v.position, 1)).xyz;
                 o.vertex = UnityWorldToClipPos(o.world);
                 o.normal = mul((float3x3)_RawToWorldNormal, v.normal);
+                // The color is RGBA8 in one uint with red in
+                // the lowest byte (Pack in the compute shader).
                 o.color = float4(float3(v.color & 255, (v.color >> 8) & 255, (v.color >> 16) & 255) / 255.0, 1);
                 return o;
             }

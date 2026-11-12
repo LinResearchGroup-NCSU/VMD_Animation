@@ -1,18 +1,37 @@
 using UnityEngine;
 using System.Collections.Generic;
 
-// Render VMD atom coordinates in this object's local coordinate space.
+// The molecule's root object, and its simplest view: one atomPrefab instance per atom, placed
+// from VMD coordinates in this object's local coordinate space (the "atom view").
+//
+// Its roles:
+// - Root: the display routes put their geometry under this transform ("VMD coordinate scene" from
+//   TrajectoryController, "VMD static scene" from RepresentationController). VMDCameraController
+//   and the XR components measure and move the molecule through this object.
+// - Startup: OnEnable adds and initializes the RepresentationController, which in turn sets up
+//   the TrajectoryController. Update sends FRAME 0 once per connection; VMDClient answers the
+//   reply with a coordinate request, and that first frame starts both controllers.
+// - Atom view: RenderMolecule receives every coordinate frame from VMDClient. It first asks the
+//   RepresentationController whether a VMD representation is drawing the molecule; only when it
+//   is not (the atom view was requested, or the mesh route is not in use) are the atoms drawn.
 public class MoleculeRenderer : MonoBehaviour
 {
     public GameObject atomPrefab; // Prefab for rendering atoms
+    // Source of coordinates. When empty, a VMDClient on this object or in the scene is used.
     [SerializeField] private VMDClient client;
-    // May need to change the scale and atom size to match the VMD scene, e.g. if the molecule is very large or very small.
+    // Unity units per VMD coordinate unit. Applies to the atom view, the coordinate-route scenes
+    // and the imported static scene (through CoordinateScale).
     [SerializeField, Min(0.0001f)] private float coordinateScale = 1f;
     // Diameter in VMD coordinate units; scaled together with atom positions.
     [SerializeField, Min(0.0001f)] private float atomSize = 1.5f;
 
+    // Atom instances of the atom view; the list index is the atom index. Instances are reused
+    // between frames and deactivated, not destroyed, when no longer needed.
     private readonly List<GameObject> atoms = new List<GameObject>();
+    // The client whose CoordinatesReceived event this renderer is subscribed to; null while the
+    // component is disabled or no client was found.
     private VMDClient subscribedClient;
+    // FRAME 0 has been sent on the current connection.
     private bool requestedInitialCoordinates;
     private RepresentationController representationController;
     public float CoordinateScale => coordinateScale;
@@ -44,6 +63,7 @@ public class MoleculeRenderer : MonoBehaviour
 
     // Request the first coordinate frame once the asynchronous connection is up;
     // reset the request flag on disconnect so it is requested again after reconnecting.
+    // The flag stays false, and the command is sent again next frame, until SendCommand succeeds.
     private void Update()
     {
         if (subscribedClient == null)
@@ -55,7 +75,7 @@ public class MoleculeRenderer : MonoBehaviour
             return;
         }
 
-        // Start each Play session at VMD frame 0, not the previously selected frame.
+        // Start each connection at VMD frame 0, not the previously selected frame.
         // VMDClient requests coordinates after receiving the OK FRAME acknowledgement.
         if (!requestedInitialCoordinates)
         {
@@ -63,9 +83,12 @@ public class MoleculeRenderer : MonoBehaviour
         }
     }
 
-    // Render one frame of atom coordinates: validate every position, center the frame on its
+    // Handle one frame of atom coordinates. Called by VMDClient.CoordinatesReceived, by OnEnable
+    // with the coordinates already cached, and by RepresentationController.ShowAtomView.
+    // The RepresentationController is told about the frame first. When it reports that a VMD
+    // representation draws the molecule, the atoms are hidden and nothing else happens here.
+    // Otherwise the atom view is drawn: validate every position, center the frame on its
     // mean position, then create or reuse atom instances and hide surplus ones.
-    // In VMD representation mode, queue a fresh export instead of drawing fallback atoms.
     public void RenderMolecule(IReadOnlyList<Vector3> coordinates)
     {
         if (coordinates == null)
@@ -74,6 +97,7 @@ public class MoleculeRenderer : MonoBehaviour
             return;
         }
 
+        // An empty frame (no coordinates received yet) skips this and hides every atom below.
         if (coordinates.Count > 0 && representationController != null &&
             representationController.OnCoordinatesUpdated())
         {
@@ -135,7 +159,8 @@ public class MoleculeRenderer : MonoBehaviour
         }
     }
 
-    // Hide all atom instances, e.g. when a static VMD scene replaces the atom view.
+    // Hide all atom instances. Called here and by RepresentationController whenever a VMD
+    // representation (coordinate route or imported mesh) draws the molecule instead.
     public void HideLegacyAtoms()
     {
         foreach (GameObject atom in atoms)

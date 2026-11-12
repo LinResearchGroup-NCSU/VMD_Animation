@@ -938,8 +938,11 @@ MonoBehaviour:
   interactionSimulator: {fileID: 590401873}
   simulateInEditor: 1
   molecule: {fileID: 1147326088}
-  moleculeOffset: {x: 0, y: 1.3, z: 0.8}
-  moleculeRadius: 0.4
+  moleculeOffset: {x: 0, y: 1.3, z: 1.5}
+  moleculeRadius: 0.8
+  immersiveRadius: 4
+  immersiveCenterAhead: 0.3
+  xrBackground: {r: 0.16, g: 0.17, b: 0.19, a: 1}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

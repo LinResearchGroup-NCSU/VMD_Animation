@@ -1,6 +1,29 @@
-// Uses real VMD QuickSurf metadata/frame fixtures from _test_trajectory.tcl in an isolated Editor project.
+// Editor check of QuickSurf on the coordinate ("Unity live") route: VMDQuickSurfScene's GPU
+// surface and its playback through TrajectoryController, and the fallback to the VMD mesh route
+// when compute shaders are unavailable. No VMD, TCP connection or Play mode is needed.
+// Uses real VMD QuickSurf metadata/frame fixtures from _test_trajectory.tcl in an isolated
+// Editor project.
+//
+// Which path runs depends on VMDQuickSurfScene.IsSupported:
+// - Supported: GeometryChecks drives a VMDQuickSurfScene directly (surface built around the
+//   atoms, drawn without shader errors, rebuilt at moved atoms, identical on returning to a
+//   frame, queued frames resolved to the newest, buffers released). Run then plays the
+//   trajectory against a fake bridge, set up as in CoordinatePlaybackChecks, and checks the
+//   status text, the reported drawing method, that no EXPORT_, STEP or FRAME command is sent,
+//   and release on disable.
+// - Not supported: Run checks that the scene stays on the VMD mesh route and that the status
+//   names compute shaders as the reason.
+//
+// Fixtures: quicksurf.json and frames.json, written by VMD_VR_Bridge/_test_trajectory.tcl into
+// the folder named by VMD_COORDINATE_TEST_ROOT. They are read by bare file name, so they must
+// be in the Editor's current directory. The GPU path writes quicksurf-preview.png there.
+//
+// This folder is outside Assets, so the main project does not compile this file. Copy it into an
+// isolated Unity project's Assets/Editor alongside the runtime scripts.
 // Run: -batchmode -force-d3d11 -executeMethod QuickSurfPlaybackChecks.Run (GPU path),
 // or -nographics to check the fallback to the VMD mesh route.
+// Each check logs "PASS <name>"; the Editor exits with code 0 when all passed, otherwise 1.
+// See COORDINATE_PLAYBACK.md, section Verification.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -15,23 +38,36 @@ using Object = UnityEngine.Object;
 
 public static class QuickSurfPlaybackChecks
 {
+    // For reaching private members of the runtime scripts through reflection.
     private static readonly BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
+    // The playback fixture: one object carrying the client, molecule and controllers.
     private static GameObject root;
     private static VMDClient client;
     private static TrajectoryController player;
+    // What the fake bridge answers: 'metadata' to TRAJ_OPEN, frames of 'frames' to TRAJ_READ.
     private static VMDTrajectoryReply metadata, frames;
+    // Everything the client has sent, and how many characters of it Tick has already answered.
     private static MemoryStream wire;
+    // remoteFrame is the fake VMD's displayed frame: set by TRAJ_SYNC, reported in every reply.
     private static int consumed, remoteFrame;
+    // While set, Tick makes the next playback step due at once.
     private static bool accelerate;
+    // An exception thrown inside Tick, rethrown by Until so that the run fails.
     private static Exception tickError;
+    // Every command line sent so far, for the check on what must never be sent.
     private static readonly List<string> commands = new List<string>();
+    // Throw on a failed check, which ends the run; log "PASS" otherwise.
     private static void Check(bool condition, string name)
     {
         if (!condition) throw new Exception("Failed: " + name);
         Debug.Log("PASS " + name);
     }
+    // Call a private parameterless method, such as a Unity message that the Editor does not send
+    // outside Play mode.
     private static void Invoke(object target, string method) => target.GetType().GetMethod(method,Private).Invoke(target,null);
+    // Load one JSON fixture.
     private static VMDTrajectoryReply Read(string path) => JsonUtility.FromJson<VMDTrajectoryReply>(File.ReadAllText(path));
+    // Wait until 'condition' holds. Fails after 20 s, or at once when Tick has thrown.
     private static async Task Until(Func<bool> condition)
     {
         DateTime end = DateTime.UtcNow.AddSeconds(20);
@@ -42,6 +78,9 @@ public static class QuickSurfPlaybackChecks
             await Task.Delay(10);
         }
     }
+    // One Editor update: run the controller's Update, then act as the bridge for the commands
+    // sent since the last call. Each TRAJ_* command gets a TRAJJSON reply, delivered to the
+    // client as if it had arrived over TCP; other commands are only recorded.
     private static void Tick()
     {
         try
@@ -61,6 +100,8 @@ public static class QuickSurfPlaybackChecks
                     case "TRAJ_OPEN":
                         reply = JsonUtility.FromJson<VMDTrajectoryReply>(JsonUtility.ToJson(metadata));
                         reply.requestId = words[1]; reply.frame = remoteFrame; break;
+                    // "TRAJ_READ <id> <token> <start> <count>": the fixture's frames repeat, so
+                    // the 30-frame trajectory that 'metadata' announces can be served.
                     case "TRAJ_READ":
                         reply.start = int.Parse(words[3]);
                         reply.frames = new VMDCoordinateFrame[int.Parse(words[4])];
@@ -75,6 +116,8 @@ public static class QuickSurfPlaybackChecks
         }
         catch (Exception error) { tickError = error; }
     }
+    // Wait until the surface has finished building on the GPU, forcing the pending readbacks to
+    // complete. Fails after 20 s.
     private static async Task Built(VMDQuickSurfScene surface)
     {
         DateTime end = DateTime.UtcNow.AddSeconds(20);
@@ -85,6 +128,7 @@ public static class QuickSurfPlaybackChecks
             await Task.Delay(10);
         }
     }
+    // Checks on VMDQuickSurfScene alone, without the controller or the fake bridge; see the header.
     private static async Task GeometryChecks()
     {
         var test = new GameObject("QuickSurf geometry fixture");
@@ -105,6 +149,7 @@ public static class QuickSurfPlaybackChecks
             surface.Show(frames.frames[0].positions);
             await Built(surface);
             Check(surface.TriangleCount == first && surface.WorldBounds.center == start.center,"seeking back rebuilds identical geometry without accumulated deformation");
+            // Show three frames without waiting for the builds in between.
             for (int i = 0; i < 3; i++) surface.Show(frames.frames[i].positions);
             await Built(surface);
             Check(surface.WorldBounds.center != start.center,"frames queued during a build resolve to the newest frame");
@@ -112,6 +157,9 @@ public static class QuickSurfPlaybackChecks
         finally { surface.Clear(); Object.DestroyImmediate(test); }
         Check(surface.SurfaceCount == 0,"teardown releases GPU buffers");
     }
+    // Render the surface into a 256 x 256 texture with an orthographic camera, save it as
+    // quicksurf-preview.png, and check that enough pixels are lit and that none has the magenta
+    // that Unity draws for a shader that failed.
     private static void Draw(GameObject fixture, VMDQuickSurfScene surface)
     {
         Bounds bounds = surface.WorldBounds;
@@ -142,6 +190,8 @@ public static class QuickSurfPlaybackChecks
             Object.DestroyImmediate(target); Object.DestroyImmediate(image); Object.DestroyImmediate(cameraObject);
         }
     }
+    // Entry point for -executeMethod. Runs every check in order and stops at the first failure.
+    // It is asynchronous and ends the Editor itself, with exit code 0 only when all checks passed.
     public static async void Run()
     {
         int exit = 1;
@@ -150,15 +200,21 @@ public static class QuickSurfPlaybackChecks
             metadata = Read("quicksurf.json"); frames = Read("frames.json");
             Check(metadata.supported && metadata.reps.Length == 0 && metadata.quicksurfs.Length == 1 &&
                 metadata.quicksurfs[0].indices.Length == 2 && metadata.quicksurfs[0].quality == 1,"real VMD QuickSurf metadata parses");
+            // Announce 30 frames although the fixture holds fewer; Tick repeats them.
             metadata.frameCount = 30;
             bool gpu = VMDQuickSurfScene.IsSupported;
             if (gpu) await GeometryChecks();
             else Check(SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null,"GPU QuickSurf is unavailable only without a graphics device");
             root = new GameObject("QuickSurf playback fixture"); client = root.AddComponent<VMDClient>();
+            // A non-null writer is what VMDClient.IsConnected tests, so this stands in for a
+            // completed handshake and captures everything the client sends.
             wire = new MemoryStream();
             typeof(VMDClient).GetField("writer",Private).SetValue(client,new StreamWriter(wire,new UTF8Encoding(false)){AutoFlush=true,NewLine="\n"});
+            // The controller opens the trajectory only once the client holds coordinates.
             var coordinates = (List<Vector3>)typeof(VMDClient).GetField("coordinates",Private).GetValue(client);
             for (int i = 0; i < metadata.atomCount; i++) coordinates.Add(Vector3.zero);
+            // The Editor does not send OnEnable outside Play mode. MoleculeRenderer's OnEnable
+            // also creates the RepresentationController and the TrajectoryController.
             var owner = root.AddComponent<MoleculeRenderer>(); Invoke(owner,"OnEnable");
             player = root.GetComponent<TrajectoryController>(); Invoke(player,"OnEnable");
             EditorApplication.update += Tick;

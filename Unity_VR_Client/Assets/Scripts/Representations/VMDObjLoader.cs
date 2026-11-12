@@ -6,8 +6,19 @@ using System.Threading;
 using UnityEngine;
 
 // Loads geometry already produced by VMD. No molecular drawing algorithms here.
+//
+// First step of the VMD mesh route's import: a Wavefront OBJ file and its MTL library become
+// plain vertex lists (Scene). The loader only reads files and fills lists, so it can run on a
+// worker thread; VMDStaticScene turns the result into Unity meshes on the main thread, and
+// VMDMeshBinding ties its vertices to atoms. RepresentationController.LoadScene calls Load for
+// both bridge exports and local OBJ files.
 public static class VMDObjLoader
 {
+    // Result of Load.
+    // - parts: the mesh parts, in creation order; VMDMeshBinding refers to them by index.
+    // - warnings: distinct messages about skipped or unsupported content, logged by the caller.
+    // - bounds: bounds of all vertices, used to center the scene.
+    // - triangleCount: total over all parts; 0 when the file contains no faces.
     public sealed class Scene
     {
         public readonly List<Part> parts = new List<Part>();
@@ -16,6 +27,12 @@ public static class VMDObjLoader
         public int triangleCount;
     }
 
+    // One Unity mesh worth of triangles. Every triangle has its own three vertices, so the
+    // per-vertex lists are equally long and 'triangles' simply counts upward.
+    // - group: name from the OBJ "g" or "o" line the faces came after.
+    // - transparent: the faces use a material with opacity below 1.
+    // - colors: MTL diffuse color times the OBJ vertex color; alpha is the material's opacity.
+    // - specular: MTL specular color in xyz and shininess in w. ambient: MTL ambient color.
     public sealed class Part
     {
         public string group;
@@ -28,6 +45,7 @@ public static class VMDObjLoader
         public readonly List<int> triangles = new List<int>();
     }
 
+    // One MTL material. The initial values also serve faces whose material cannot be resolved.
     private sealed class ObjMaterial
     {
         public Color diffuse = Color.gray;
@@ -36,6 +54,8 @@ public static class VMDObjLoader
         public float opacity = 1f, shininess = 40f;
     }
 
+    // One corner of an OBJ face: zero-based indices into the file's position and normal lists;
+    // normal is -1 when the face gives none.
     private readonly struct FaceVertex
     {
         public readonly int position, normal;
@@ -45,6 +65,10 @@ public static class VMDObjLoader
     // Parse a VMD-exported Wavefront OBJ (and its MTL library) into Unity-ready mesh parts.
     // Converts to Unity's left-handed coordinates, fan-triangulates polygons, splits batches by
     // group, transparency and a 60k-vertex limit, and enforces input size limits.
+    // Limits: 128 MB per OBJ, 16 MB per MTL, 2 million input vertices, 500,000 triangles.
+    // Throws for a missing, malformed or oversized file; an error found while parsing is a
+    // FormatException that names the OBJ line. Lines, points and texture maps are skipped with a
+    // warning.
     // Safe to run off the main thread; honors the cancellation token.
     public static Scene Load(string path, CancellationToken token)
     {
@@ -53,11 +77,15 @@ public static class VMDObjLoader
             throw new FormatException("Choose a VMD Wavefront .obj file.");
         CheckFile(path, 128L * 1024 * 1024);
         var scene = new Scene();
+        // The file's "v" and "vn" records, already converted to Unity's handedness. vertexColors
+        // runs parallel to positions: the optional r g b after x y z, white when absent.
         var positions = new List<Vector3>();
         var normals = new List<Vector3>();
         var vertexColors = new List<Color>();
         var materials = new Dictionary<string, ObjMaterial>(StringComparer.Ordinal);
+        // The part currently being filled for each group and transparency combination.
         var batches = new Dictionary<string, Part>(StringComparer.Ordinal);
+        // State set by "g"/"o" and "usemtl" lines; it applies to the faces that follow.
         string group = "VMD scene", materialName = "";
         var defaultMaterial = new ObjMaterial();
         bool hasBounds = false;
@@ -74,6 +102,7 @@ public static class VMDObjLoader
                 {
                     case "v":
                         if (words.Length < 4) throw new FormatException("Incomplete vertex.");
+                        // Negating Z converts the OBJ's right-handed coordinates to Unity's.
                         positions.Add(new Vector3(Number(words[1]), Number(words[2]), -Number(words[3])));
                         vertexColors.Add(words.Length >= 7
                             ? new Color(Number(words[4]), Number(words[5]), Number(words[6])) : Color.white);
@@ -88,6 +117,7 @@ public static class VMDObjLoader
                         string library = line.Substring(words[0].Length).Trim().Trim('"');
                         string directory = Path.GetDirectoryName(path);
                         string materialPath = Path.GetFullPath(Path.Combine(directory, library));
+                        // Only an MTL file in the OBJ's folder or one of its subfolders is read.
                         if (Path.IsPathRooted(library) ||
                             !materialPath.StartsWith(directory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                             throw new FormatException("MTL must be in the OBJ folder or a subfolder.");
@@ -110,12 +140,15 @@ public static class VMDObjLoader
                         }
                         bool transparent = material.opacity < 0.999f;
                         string key = group + (transparent ? "\ntransparent" : "\nopaque");
+                        // Triangle fan: the first corner plus each pair of neighboring corners.
                         FaceVertex a = Index(words[1], positions.Count, normals.Count);
                         for (int j = 2; j < words.Length - 1; j++)
                         {
                             // Reflect Z and reverse winding to convert OBJ to Unity handedness.
                             FaceVertex b = Index(words[j + 1], positions.Count, normals.Count);
                             FaceVertex c = Index(words[j], positions.Count, normals.Count);
+                            // Start a new part when this one is full. VMDStaticScene builds meshes
+                            // with Unity's default 16-bit indices, which address 65,535 vertices.
                             if (!batches.TryGetValue(key, out Part part) || part.vertices.Count + 3 > 60000)
                             {
                                 part = new Part { group = group, transparent = transparent };
@@ -135,6 +168,7 @@ public static class VMDObjLoader
                     case "p":
                         scene.warnings.Add("OBJ lines/points are not displayed by this triangle-only static loader.");
                         break;
+                    // Texture coordinates and smoothing groups are not used.
                     case "vt":
                     case "s":
                         break;
@@ -144,6 +178,7 @@ public static class VMDObjLoader
                 }
             }
         }
+        // Report every failure with its line number; a cancellation passes through unchanged.
         catch (Exception error) when (!(error is OperationCanceledException))
         {
             throw new FormatException($"OBJ line {lineNumber}: {error.Message}", error);
@@ -217,6 +252,7 @@ public static class VMDObjLoader
 
     // Read an MTL file and fill the material table with diffuse (Kd), specular (Ks), ambient (Ka),
     // shininess (Ns) and opacity (d / Tr). Texture maps are not imported and only produce a warning.
+    // "Tr" is transparency, so opacity is 1 - Tr; "d" is opacity itself.
     private static void ReadMaterials(string path, Dictionary<string, ObjMaterial> materials,
         HashSet<string> warnings, CancellationToken token)
     {

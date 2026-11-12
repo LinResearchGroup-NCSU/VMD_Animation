@@ -1,5 +1,10 @@
 // QuickSurf on the GPU: a Gaussian density grid like VMD's QuickSurf, then marching
 // tetrahedra. Vertices stay in VMD coordinates; the draw shader applies the view.
+//
+// VMDQuickSurfScene.Build runs the three kernels in order for one surface and
+// one frame: ClearGrid zeroes the grid and the triangle counter, SplatAtoms
+// adds every atom's density and color to the grid, and BuildSurface writes
+// the isosurface triangles to _Vertices, which VMDQuickSurf.shader draws.
 #pragma kernel ClearGrid
 #pragma kernel SplatAtoms
 #pragma kernel BuildSurface
@@ -7,30 +12,44 @@
 // Fixed-point scale for portable integer atomics (float atomics are not universal).
 #define DENSITY_SCALE 65536.0
 
+// Atom mirrors GpuAtom in VMDQuickSurfScene (32 bytes). SurfaceVertex (28 bytes)
+// is declared again in VMDQuickSurf.shader; its color is RGBA8 as packed by Pack.
 struct Atom { float3 position; float invTwoSigma2; float3 color; float cutoff; };
 struct SurfaceVertex { float3 position; float3 normal; uint color; };
 
+// _Density holds one fixed-point density per grid point. _Counter[0]
+// counts the triangles of the current build, including those that did
+// not fit in _Vertices. _Vertices holds three vertices per triangle.
 StructuredBuffer<Atom> _Atoms;
 RWStructuredBuffer<uint> _Density;
 RWStructuredBuffer<uint> _ColorSum; // Three density-weighted channels per grid point.
 RWStructuredBuffer<uint> _Counter;
 RWStructuredBuffer<SurfaceVertex> _Vertices;
 
+// _CellCount: grid points in total. _ThreadCount: threads dispatched for ClearGrid.
+// _Capacity: triangles that fit in _Vertices. _DimX, _DimY, _DimZ: grid points per axis.
+// _Spacing: distance between grid points. _Origin: position of grid
+// point (0, 0, 0). Positions and lengths are in VMD coordinates.
 uint _AtomCount, _CellCount, _ThreadCount, _Capacity;
 uint _DimX, _DimY, _DimZ;
 float _Spacing, _Isovalue;
 float4 _Origin;
 
-// Freudenthal split of a cube into six tetrahedra around the 0-6 diagonal. Every cube
+// Corner[k] is the grid offset of cube corner k, and Tetra lists the four corners of each of
+// six tetrahedra. This is the Freudenthal split of a cube around the 0-6 diagonal. Every cube
 // is split the same way, so neighboring cubes share face diagonals and edges (no cracks).
 static const int3 Corner[8] = { int3(0,0,0), int3(1,0,0), int3(1,1,0), int3(0,1,0),
                                 int3(0,0,1), int3(1,0,1), int3(1,1,1), int3(0,1,1) };
 static const uint Tetra[24] = { 0,5,1,6, 0,1,2,6, 0,2,3,6, 0,3,7,6, 0,7,4,6, 0,4,5,6 };
 
+// Cell: index of a grid point in the buffers. Clamp: the nearest grid point inside the grid.
+// Density: the density at a grid point, converted back from fixed point.
 uint Cell(int3 c) { return (uint)c.x + _DimX * ((uint)c.y + _DimY * (uint)c.z); }
 int3 Clamp(int3 c) { return clamp(c, int3(0,0,0), int3(_DimX, _DimY, _DimZ) - 1); }
 float Density(int3 c) { return _Density[Cell(Clamp(c))] / DENSITY_SCALE; }
 
+// Zero the density, the color sums and the triangle counter. Thread i clears the grid points
+// i, i + _ThreadCount, i + 2 * _ThreadCount and so on, so a grid of any size is covered.
 [numthreads(256,1,1)]
 void ClearGrid(uint3 id : SV_DispatchThreadID)
 {
@@ -42,6 +61,9 @@ void ClearGrid(uint3 id : SV_DispatchThreadID)
     if (id.x == 0) _Counter[0] = 0;
 }
 
+// One thread per atom: add the atom's Gaussian density, and its color
+// weighted by that density, to every grid point within the atom's cutoff. The
+// adds are interlocked because several atoms write to the same grid point.
 [numthreads(64,1,1)]
 void SplatAtoms(uint3 id : SV_DispatchThreadID)
 {
@@ -71,6 +93,8 @@ void SplatAtoms(uint3 id : SV_DispatchThreadID)
     }
 }
 
+// Density gradient by central differences, clamped at the grid border.
+// It is only used for normals, so it is not divided by the spacing.
 float3 Gradient(int3 c)
 {
     return float3(Density(c + int3(1,0,0)) - Density(c - int3(1,0,0)),
@@ -78,6 +102,7 @@ float3 Gradient(int3 c)
                   Density(c + int3(0,0,1)) - Density(c - int3(0,0,1)));
 }
 
+// Density-weighted mean color of the atoms at a grid point; white where there is no density.
 float3 AtomColor(int3 c)
 {
     uint cell = Cell(c);
@@ -86,17 +111,22 @@ float3 AtomColor(int3 c)
     return float3(_ColorSum[cell*3], _ColorSum[cell*3+1], _ColorSum[cell*3+2]) / weight;
 }
 
+// RGBA8 in one uint: red in the lowest byte, alpha 255.
 uint Pack(float3 color)
 {
     uint3 bytes = (uint3)(saturate(color) * 255.0 + 0.5);
     return bytes.x | (bytes.y << 8) | (bytes.z << 16) | (255u << 24);
 }
 
+// State of the cube that a BuildSurface thread works on: its lowest
+// corner, and the density, gradient and color at its eight corners.
 static int3 baseCell;
 static float value[8];
 static float3 gradient[8];
 static float3 tint[8];
 
+// Vertex where the isosurface crosses the cube edge between corners i and
+// j. Position, gradient and color are interpolated linearly along the edge.
 SurfaceVertex Edge(uint i, uint j)
 {
     float t = saturate((_Isovalue - value[i]) / (value[j] - value[i]));
@@ -109,6 +139,9 @@ SurfaceVertex Edge(uint i, uint j)
     return v;
 }
 
+// Append one triangle to _Vertices. Degenerate triangles are skipped, and a vertex
+// without a usable gradient gets the face normal. The winding is not made consistent;
+// VMDQuickSurf.shader draws both faces and turns the normal toward the camera.
 void Emit(SurfaceVertex a, SurfaceVertex b, SurfaceVertex c)
 {
     float3 face = cross(b.position - a.position, c.position - a.position);
@@ -124,9 +157,14 @@ void Emit(SurfaceVertex a, SurfaceVertex b, SurfaceVertex c)
     _Vertices[slot*3] = a; _Vertices[slot*3+1] = b; _Vertices[slot*3+2] = c;
 }
 
+// One thread per grid cube, whose lowest corner is grid point 'id'. A cube that the
+// surface does not cross is skipped. Otherwise it is split into six tetrahedra, and
+// each tetrahedron that the surface crosses emits one or two triangles, depending on
+// which of its corners are inside the surface (density at or above the isovalue).
 [numthreads(4,4,4)]
 void BuildSurface(uint3 id : SV_DispatchThreadID)
 {
+    // The dispatch is rounded up to whole thread groups, so some threads lie outside the grid.
     if (id.x + 1 >= _DimX || id.y + 1 >= _DimY || id.z + 1 >= _DimZ) return;
     baseCell = int3(id);
     uint inside = 0;
