@@ -68,11 +68,16 @@ Desktop.ini
 /Unity_VR_Client/*_BackUpThisFolder_ButDontShipItWithYourGame/
 /Unity_VR_Client/*_BurstDebugInformation_DoNotShip/
 
-# Local rendering configuration and environment overrides
+# Private data and local rendering configuration
+/local/
 /.render.tcl
-/.env
-/.env.local
-/.env.*.local
+
+# Local environment overrides and Claude settings
+.env
+.env.*
+!.env.example
+!.env.*.example
+**/.claude/settings.local.json
 
 # Generated playback-check previews; keep test sources and fixtures trackable
 /Unity_VR_Client/Tests/cartoon-preview.png
