@@ -12,6 +12,8 @@
 #   set env(VMD_VR_PORT) 45455
 # before sourcing, and give Unity the same port (see VMDClient).
 
+# The body runs in an anonymous procedure, so its variables stay local. Its one argument is
+# the directory of this script, from which the bridge script is located.
 apply {{script_directory} {
     if {[llength [info commands ::molinfo]] == 0} {
         error "Run start_vr.tcl inside VMD."

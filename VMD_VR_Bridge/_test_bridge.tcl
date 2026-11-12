@@ -1,33 +1,43 @@
 # Self-contained tcltest regression tests for vmd_vr_bridge.tcl.
 #
-# Run from PowerShell (VMD 1.9.4 for Windows):
+# Run in a separate VMD text process from the VMD_VR_Bridge directory, not in an active
+# research session: the script ends with quit. From PowerShell (VMD 1.9.4 for Windows):
 #   & 'C:\Program Files\VMD\vmd.exe' -dispdev text -e .\_test_bridge.tcl -eofexit
 #
-# Each test creates and deletes a tiny temporary PDB. It never loads, edits,
-# or deletes the MutLalpha files used by the research workflow.
-
+# Tests that need a molecule create and delete a tiny temporary PDB in the current directory.
+# They never load, edit, or delete the MutLalpha files used by the research workflow.
+# The tcltest report is written to _test_bridge_result_<pid>.txt next to this script, and a
+# summary line is printed at the end. The bridge is started on ports 45455 and 45456.
+#
 # Tests currently cover:
-# - Command handling: PING, HELLO, STATE, PLAY, PAUSE, FRAME, STEP, HIGHLIGHT, HELP, and unknown commands
+# - Command handling: PING, HELLO, STATE, PLAY, PAUSE, FRAME, STEP, HIGHLIGHT, HELP, and
+#   unknown commands
 # - Selections: SELECT names, selection text and errors, define_selection
 # - Port configuration: default port, VMD_VR_PORT override, and invalid values
 # - Frame control: valid frame seeking, stepping, boundary clamping, and invalid arguments
 # - Highlighting: adding/clearing domain representations and rejecting invalid selections
-# - TCP connection: client connection, READY/STATE handshake, command responses, and client disconnection
+# - TCP connection: client connection, READY/STATE greeting, HELLO handshake, command
+#   responses, and client disconnection
 # - State synchronization: polling broadcasts a STATE update when the VMD frame changes
-# - All current regression tests pass
+# TOGGLE and GET_COORDS are not exercised here. The scene and TRAJ_ commands have their own
+# scripts: _test_static_export.tcl, _test_trajectory.tcl and _test_cartoon.tcl.
 
 package require tcltest 2.2
 
 namespace eval ::vrbridge_test {
+    # Path of the temporary PDB, and the VMD ID of the molecule loaded from it.
     variable fixture ""
     variable molid -1
+    # Client socket of the TCP tests, and the port the bridge is started on for them.
     variable client ""
     variable port 45455
+    # The line that socket_readable hands to await_line, or __EOF__ / __TIMEOUT__.
     variable awaited_line ""
 }
 
 # Write a two-atom temporary PDB, load it into VMD and duplicate frames
-# so the molecule has three frames for frame/step tests.
+# so the molecule has three frames for frame/step tests. The residue numbers 1 and 331 put
+# atom 0 in the bridge's N_DOMAIN selection and atom 1 in C_DOMAIN.
 proc ::vrbridge_test::make_fixture {} {
     variable fixture
     variable molid
@@ -178,6 +188,7 @@ set ::vrbridge_test::bridge_path [file normalize \
 set ::vrbridge_test::report_path [file normalize \
     [file join [file dirname [info script]] [format "_test_bridge_result_%d.txt" [pid]]]]
 
+# Send the tcltest output to the report file (.gitignore excludes these reports).
 ::tcltest::configure -verbose {pass error} -outfile $::vrbridge_test::report_path
 
 if {![file exists $::vrbridge_test::bridge_path]} {
@@ -185,6 +196,7 @@ if {![file exists $::vrbridge_test::bridge_path]} {
 }
 source $::vrbridge_test::bridge_path
 
+# The command, select and port-1.1 tests call the bridge's procs directly, without a socket.
 ::tcltest::test command-1.1 {PING, empty input, HELP and unknown command} \
     -setup {::vrbridge_test::make_fixture} \
     -body {
@@ -363,6 +375,7 @@ source $::vrbridge_test::bridge_path
     } \
     -result {1 45456}
 
+# The tcp tests start the bridge and talk to it through a real client socket.
 ::tcltest::test tcp-1.1 {client receives greeting and initial state} \
     -setup {::vrbridge_test::connect_client} \
     -body {
@@ -424,6 +437,7 @@ source $::vrbridge_test::bridge_path
     -cleanup {::vrbridge_test::cleanup} \
     -result {STATE 1 1}
 
+# Print a summary line and the report path, then leave VMD.
 set ::vrbridge_test::passed $::tcltest::numTests(Passed)
 set ::vrbridge_test::failed $::tcltest::numTests(Failed)
 ::tcltest::cleanupTests

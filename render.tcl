@@ -12,6 +12,8 @@
 # "waitfor all" reads every frame before continuing, so VMD does not redraw the scene for each loaded frame.
 # Redrawing is also paused until all representations below are set up.
 display update off
+mol new mutl_open_CA.pdb
+mol addfile Example_Trajectory.xtc first 0 last 2000 waitfor all
 # mol new your_coordinate_file.pdb; #user-defined, see the example above
 # mol addfile your_trajectory_file.xtc first first_frame last last_frame waitfor all; #user-defined, see the example above
 animate goto 0

@@ -1,42 +1,54 @@
-# # VMD-VR Bridge Script for VMD 1.9.4 Windows 64-bit
-
-# This script provides a TCP bridge between VMD and a VR application.
-# It allows the VR application to send commands to VMD and receive
-# VMD state updates for synchronization.
-
-# Basic Usage:
-# 1. Start or stop TCP server for communication with VR applications.
-# 2. Receive commands from Unity to control VMD, such as changing the
-#    trajectory frame, playing/pausing the trajectory, and highlighting regions.
-# 3. Handle VMD control commands sent from Unity, enabling real-time interaction with
-#    molecular structures in VR.
-# 4. Read current status of VMD and send it back to Unity for synchronization.
-
-# start / stop / accept / disconnect / send / receive / handle_command / send_state / poll
-
-# ::vrbridge::start port in VMD console to start the bridge server on port.
-# Without a port, it uses the VMD_VR_PORT environment variable, or 45454.
-# In VMD: set env(VMD_VR_PORT) 45455 before sourcing start_vr.tcl.
-
+# VMD-Unity bridge: a line-based TCP server that runs inside VMD.
+#
+# A client (the Unity viewer, see Unity_VR_Client/Assets/Scripts/VMD/VMDClient.cs) connects to
+# 127.0.0.1 on the same computer, sends one command per line and receives one reply line for each.
+# The two processes share exported meshes through local files. The bridge also
+# polls VMD every poll_ms milliseconds and sends a STATE line to every client when the top
+# molecule, its frame, its frame count or its view matrices have changed.
+#
+# Loading: normally through start_vr.tcl in the repository root. By hand, from that directory:
+#   source VMD_VR_Bridge/vmd_vr_bridge.tcl
+#   ::vrbridge::start
+# and ::vrbridge::stop to shut the bridge down. Sourcing this file resets the server and
+# client variables without closing their sockets, so call ::vrbridge::stop before sourcing it
+# again (start_vr.tcl does).
+#
+# This file implements the server, the STATE broadcast and the commands PING, HELLO, STATE,
+# PLAY, PAUSE, TOGGLE, FRAME, STEP, HIGHLIGHT, SELECT, GET_COORDS and HELP. The files sourced
+# at the end implement the others:
+#   static_scene.tcl  GET_SCENE_STATE, EXPORT_SCENE, SET_REPRESENTATION, RELEASE_SCENE
+#   trajectory.tcl    TRAJ_OPEN, TRAJ_READ, TRAJ_CHECK, TRAJ_SYNC, TRAJ_STYLE
+#                     (it sources cartoon.tcl and quicksurf.tcl)
+# README.md, section "VMD bridge", has the command table.
+#
+# Port: ::vrbridge::start <port> listens on the given port. Without a port it uses the
+# VMD_VR_PORT environment variable, or 45454. In VMD: set env(VMD_VR_PORT) 45455 before
+# sourcing start_vr.tcl. The Unity client must be given the same port.
+#
 # Protocol handshake: a client sends HELLO <version> after connecting.
 # Increase protocol_version only for changes that break existing clients
-# (command arguments, reply formats, export formats); the Unity client must match.
+# (command arguments, reply formats, export formats); VMDClient.ProtocolVersion must match.
 
-# TODO: Currently limited to localhost (127.0.0.1) for local development.
-# For future remote VR clients, allow network connections and update
-# the client address and connection/security settings.
-
-# Namespace for VR Bridge
 namespace eval vrbridge {
+    # Sent in the READY greeting and compared with the version in a client's HELLO.
     variable protocol_version 1
+    # default_port applies when neither ::vrbridge::start nor VMD_VR_PORT names a port.
+    # port is the port the server was last started on.
     variable default_port 45454
     variable port 45454
+    # Listening socket, or "" while the bridge is stopped.
     variable server ""
+    # Channels of the connected clients.
     variable clients {}
+    # Last STATE line sent by poll; the next one is sent only when it differs.
     variable last_state ""
+    # Polling interval in milliseconds, and the "after" ID of the next scheduled poll.
     variable poll_ms 100
     variable timer ""
+    # Index of the representation added by HIGHLIGHT, or -1 when there is none.
     variable highlight_rep -1
+    # Array that maps a selection name (upper case) to VMD selection text, for SELECT and
+    # HIGHLIGHT. ::vrbridge::define_selection adds entries.
     variable selections
 
     # These labels map to MutLalpha domains from the existing VMD project.
@@ -56,6 +68,7 @@ namespace eval vrbridge {
 }
 
 # Port used when start is called without one: VMD_VR_PORT if set, otherwise 45454.
+# Raises an error when VMD_VR_PORT is not an integer between 1 and 65535.
 proc ::vrbridge::configured_port {} {
     variable default_port
     if {[info exists ::env(VMD_VR_PORT)] && [string trim $::env(VMD_VR_PORT)] ne ""} {
@@ -64,9 +77,10 @@ proc ::vrbridge::configured_port {} {
     return $default_port
 }
 
-# Start the VR bridge server
-# If the server is already running, it will return the current port.
-# Otherwise, it will start a new server on the specified port.
+# Start the server on 127.0.0.1 and start polling VMD's state.
+# requested_port: port to listen on; when empty, configured_port chooses it.
+# Returns the port. If the bridge is already running, nothing changes and its current port is
+# returned. Called by start_vr.tcl, or by hand from the Tk Console.
 proc ::vrbridge::start {{requested_port ""}} {
     variable server
     variable port
@@ -86,9 +100,9 @@ proc ::vrbridge::start {{requested_port ""}} {
     return $port
 }
 
-# Stop the VR bridge server and close all client connections
-# This function will close the server socket and all connected client sockets,
-# effectively stopping the VR bridge.
+# Stop the bridge: close every client connection (dropping that client's trajectory snapshot
+# and export lease), close the listening socket and cancel the poll timer.
+# Called by start_vr.tcl before it sources this file again, or by hand.
 proc ::vrbridge::stop {} {
     variable server
     variable clients
@@ -111,11 +125,10 @@ proc ::vrbridge::stop {} {
     puts "VMD-VR bridge stopped"
 }
 
-# Accept a new client connection
-# This function is called when a new client connects to the VR bridge server.
-# It checks the client's address to ensure it is from localhost,
-# configures the channel for non-blocking I/O,
-# and sets up a file event to handle incoming messages from the client.
+# Server-socket callback for a new connection.
+# Registers the channel (non-blocking, line-buffered, UTF-8, LF line endings) and its
+# readable handler, then sends the greeting "READY VMD_VR_BRIDGE <protocol_version>" followed
+# by the current STATE line, or by an ERROR line when no molecule is loaded.
 proc ::vrbridge::accept {channel address remote_port} {
     variable clients
     variable protocol_version
@@ -135,9 +148,8 @@ proc ::vrbridge::accept {channel address remote_port} {
     puts "VR client connected from $address:$remote_port"
 }
 
-# Disconnect a client connection
-# This function is called when a client disconnects from the VR bridge server.
-# It removes the client from the list of connected clients and closes the channel.
+# Forget one client: drop its trajectory snapshot and export lease, remove it from the client
+# list and close its channel. Called by receive at end of file and by send when a write fails.
 proc ::vrbridge::disconnect {channel} {
     variable clients
     ::vrbridge::trajectory_disconnect $channel
@@ -149,9 +161,7 @@ proc ::vrbridge::disconnect {channel} {
     catch {close $channel}
 }
 
-# Send a message to a client
-# This function sends a message to the specified client channel.
-# If an error occurs while sending the message, it will disconnect the client.
+# Write one line to a client. A failed write disconnects that client.
 proc ::vrbridge::send {channel message} {
     if {[catch {
         puts $channel $message
@@ -161,9 +171,8 @@ proc ::vrbridge::send {channel message} {
     }
 }
 
-# Receive and handle commands from a client
-# This function reads incoming messages from the client channel,
-# processes each command, and sends back a response if necessary.
+# Readable-event callback for a client channel: pass every complete line to handle_command
+# and send back each non-empty reply. At end of file the client is disconnected.
 proc ::vrbridge::receive {channel} {
     if {[eof $channel]} {
         ::vrbridge::disconnect $channel
@@ -178,8 +187,7 @@ proc ::vrbridge::receive {channel} {
     }
 }
 
-# Send a message to all connected clients
-# This function iterates through all connected client channels and sends the specified
+# Send one line to every connected client. poll uses it for STATE updates.
 proc ::vrbridge::broadcast {message} {
     variable clients
     foreach channel $clients {
@@ -187,8 +195,7 @@ proc ::vrbridge::broadcast {message} {
     }
 }
 
-# This function returns the ID of the top molecule in VMD.
-# If no molecule is loaded, it raises an error.
+# Return the ID of VMD's top molecule, or raise an error when no molecule is loaded.
 proc ::vrbridge::top_molecule {} {
     set molid [molinfo top]
     if {$molid < 0} {
@@ -197,8 +204,10 @@ proc ::vrbridge::top_molecule {} {
     return $molid
 }
 
-# Read the current state of VMD and return it as a formatted message.
-# This function retrieves the current frame, number of frames, and transformation matrices
+# Build the STATE line for the top molecule:
+#   STATE <molid> <frame> <frameCount> <rotate> <center> <scale> <global>
+# The last four are VMD's 4x4 view matrices. Raises an error when no molecule is loaded.
+# Used for the STATE command, the connection greeting and the poll broadcast.
 proc ::vrbridge::state_message {} {
     set molid [::vrbridge::top_molecule]
     set frame [molinfo $molid get frame]
@@ -208,13 +217,13 @@ proc ::vrbridge::state_message {} {
     set scale [lindex [molinfo $molid get scale_matrix] 0]
     set global [lindex [molinfo $molid get global_matrix] 0]
 
-    # Braces preserve each VMD 4x4 matrix as one Tcl list.  The PCVR client
-    # converts these row-major matrices to its own coordinate convention.
+    # The list command keeps each 4x4 matrix together as one braced element. Unity's
+    # VMDClient reads only the frame and the frame count from this line.
     return [list STATE $molid $frame $frame_count $rotation $center $scale $global]
 }
 
-# Send the current state of VMD to a client channel.
-# This function retrieves the current state of VMD and sends it to the specified client channel.
+# Send the current STATE line to one client, or "ERROR <message>" when it cannot be built
+# (no molecule loaded). Called by accept.
 proc ::vrbridge::send_state {channel} {
     if {[catch {set message [::vrbridge::state_message]} error]} {
         ::vrbridge::send $channel [list ERROR $error]
@@ -223,9 +232,9 @@ proc ::vrbridge::send_state {channel} {
     ::vrbridge::send $channel $message
 }
 
-# Polling function to check for state changes in VMD
-# This function periodically checks the current state of VMD and broadcasts it to all
-# connected clients if there are any changes. It uses a timer to schedule the next poll.
+# Timer callback: broadcast the STATE line when it differs from the last one sent, then
+# schedule the next poll after poll_ms milliseconds. Nothing is sent while no molecule is
+# loaded. start schedules the first poll and stop cancels the timer.
 proc ::vrbridge::poll {} {
     variable poll_ms
     variable timer
@@ -238,7 +247,8 @@ proc ::vrbridge::poll {} {
     set timer [after $poll_ms ::vrbridge::poll]
 }
 
-# Validate that a value is an integer within a specified range.
+# Return value when it is an integer between minimum and maximum (inclusive); otherwise raise
+# an error that starts with name, the caller's word for the argument.
 proc ::vrbridge::integer_in_range {value minimum maximum name} {
     if {![string is integer -strict $value] || $value < $minimum || $value > $maximum} {
         error "$name must be an integer between $minimum and $maximum"
@@ -246,7 +256,11 @@ proc ::vrbridge::integer_in_range {value minimum maximum name} {
     return $value
 }
 
-# Highlight a specific selection in VMD based on the provided label.
+# HIGHLIGHT <label>: mark a named selection in VMD itself by adding a VDW representation
+# (ColorID 0, Opaque) to the top molecule. The representation added by the previous call is
+# deleted first, so at most one exists; the label ALL only deletes it.
+# label: a key of the selections array, in any letter case; unknown names raise an error.
+# Unity does not send this command: it uses SELECT and draws the highlight itself.
 proc ::vrbridge::highlight {label} {
     variable selections
     variable highlight_rep
@@ -277,6 +291,7 @@ proc ::vrbridge::highlight {label} {
 #   ::vrbridge::define_selection MY_DOMAIN {chain A and resid 10 to 120}
 # Names are case-insensitive letters, digits and underscores; ALL is reserved.
 # Definitions survive reloading the bridge, unless they redefine a built-in name.
+# Returns the name in upper case. Meant to be called from VMD's Tk Console.
 proc ::vrbridge::define_selection {name selection} {
     variable selections
     set name [string toupper $name]
@@ -298,6 +313,11 @@ proc ::vrbridge::define_selection {name selection} {
 # the client draws the highlight itself. Text that is not a defined name is used as a VMD
 # atom selection and may contain spaces. Replies use their own SELJSON envelope, so clients
 # can tell them apart from trajectory replies; errors for a valid request ID are SELJSON too.
+# words: the words after SELECT; the first is the request ID. An invalid request ID raises an
+# error, which handle_command returns as a plain ERROR line.
+# The reply's JSON object holds requestId and either "error" or: ok, molecule, atomCount
+# (atoms in the whole molecule, not in the selection), label (the matched selection name,
+# empty for selection text) and indices.
 proc ::vrbridge::select_command {words} {
     variable selections
     set id [lindex $words 0]
@@ -324,10 +344,14 @@ proc ::vrbridge::select_command {words} {
     return "SELJSON [format {{"requestId":%s,%s}} [::vrbridge::scene_json_string $id] $data]"
 }
 
-# Handle a command received from a client.
-# This function processes a command string, executes the corresponding action in VMD,
-# and returns a response message. It supports commands like PING, HELLO, STATE, PLAY, PAUSE,
-# TOGGLE, FRAME, STEP, HIGHLIGHT, and HELP.
+# Run one command line and return its reply line ("" for an empty line).
+# line: the trimmed command line; the command name is case-insensitive.
+# channel: the client's channel, or "" when called from the Tk Console or a test. The
+# trajectory and scene commands use it to tell clients apart (snapshots and export leases).
+# An error raised by a command is returned as "ERROR <message>". SELECT, the scene commands
+# and the TRAJ_ commands report most failures in their own SELJSON, SCENEERROR and TRAJJSON
+# replies instead. PLAY, PAUSE and TOGGLE drive VMD's own animation.
+# Called by receive for every line a client sends.
 proc ::vrbridge::handle_command {line {channel ""}} {
     if {$line eq ""} {
         return ""
@@ -365,7 +389,7 @@ proc ::vrbridge::handle_command {line {channel ""}} {
                 set result "OK PAUSE"
             }
             TOGGLE {
-                if ([animate info] eq "paused") {
+                if {[animate info] eq "paused"} {
                     animate forward
                 } else {
                     animate pause
@@ -382,6 +406,7 @@ proc ::vrbridge::handle_command {line {channel ""}} {
                 set result [list OK FRAME $frame]
             }
             STEP {
+                # Unlike FRAME, a target outside the trajectory is clamped, not rejected.
                 if {[llength $args] != 1} { error "Usage: STEP <delta>" }
                 if {![string is integer -strict [lindex $args 0]]} {
                     error "delta must be an integer"
@@ -407,6 +432,8 @@ proc ::vrbridge::handle_command {line {channel ""}} {
                 set result [::vrbridge::select_command $args]
             }
             GET_COORDS {
+                # Reply: COORDS and one list of x y z triples, for every atom of the top
+                # molecule at its current frame.
                 set molid [::vrbridge::top_molecule]
                 set frame [molinfo $molid get frame]
                 set coords [atomselect $molid "all" frame $frame]
@@ -438,6 +465,8 @@ proc ::vrbridge::handle_command {line {channel ""}} {
     return $result
 }
 
-# Keep representation export separate from the existing command/coordinate bridge.
+# The remaining commands live in separate files: scene export in static_scene.tcl and
+# coordinate playback in trajectory.tcl. static_scene.tcl also defines scene_request_id and
+# scene_json_string, which select_command above uses.
 source [file join [file dirname [info script]] static_scene.tcl]
 source [file join [file dirname [info script]] trajectory.tcl]
