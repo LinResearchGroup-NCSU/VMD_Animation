@@ -22,7 +22,7 @@
 // Copy into an isolated Unity project's Assets/Editor alongside the runtime scripts.
 // Run: -batchmode -nographics -executeMethod CoordinatePlaybackChecks.Run
 // Each check logs "PASS <name>"; the Editor exits with code 0 when all passed, otherwise 1.
-// See COORDINATE_PLAYBACK.md, section Verification.
+// See docs/COORDINATE_PLAYBACK.md (repository root), section Verification.
 using System;
 using System.Collections.Generic;
 using System.IO;

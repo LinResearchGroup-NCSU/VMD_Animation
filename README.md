@@ -2,13 +2,26 @@
 Here is a step-by-step guide to generate scientific presentation-ready movies of biomolecular conformational changes from raw MD trajectory. Enjoy!
 
 The repository also includes a local VMD → Unity viewer with coordinate playback, automatic representation synchronization, and VMD-generated geometry. See [VMD and Unity viewer](#vmd-and-unity-viewer) for setup and current limitations. The original movie-making workflow below remains available.
+
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| `animation/` | Movie-making Tcl scripts: `render.tcl` (also sets up the VR sample scene), `Align_all_frames.tcl`, `with_capture.tcl`, `without_capture.tcl`, `visualization.tcl`, `la.tcl`, `orient.tcl`, `viewpoint_example.tcl`. |
+| `data/` | Sample MutLα structure and trajectory (`mutl_open_CA.pdb`, `Example_Trajectory.xtc`) and the example movie. |
+| `start_vr.tcl`, `VMD_VR_Bridge/` | VMD side of the VR viewer: launcher and TCP bridge, with its regression tests. |
+| `Unity_VR_Client/` | Unity 6 project of the VR viewer. Build output goes to the ignored `Unity_VR_Client/Builds/`. |
+| `vr.cmd`, `tools/` | The `vr build / run / deploy / test` command line (`tools/vr.ps1`) and the lab bundle templates (`tools/bundle/`). See [Build, run, deploy](#build-run-deploy). |
+| `docs/` | `VR_ISSUES.md` (headset tests, launch procedures, open issues) and `COORDINATE_PLAYBACK.md`. |
+| `local/` | Ignored; for private data and local exports. |
+
 ## Start
-Open VMD and launch TkConsole. Ensure that your coordinate and trajectory files are located in the `VMD_Animation` directory; otherwise, specify their paths in `render.tcl`.
+Open VMD and launch TkConsole, then `cd` to the repository root. The scripts find their helper files and the sample data relative to their own folder, so they also work from another working directory. To use your own coordinate and trajectory files, specify their paths in `animation/render.tcl`.
 
         cd VMD_Animation
 
 ## Render 
-### Step 1. Provide the path to the PDB and XTC files with frames to be imported in `render.tcl`
+### Step 1. Provide the path to the PDB and XTC files with frames to be imported in `animation/render.tcl`
 Example:
 
 ```tcl
@@ -16,13 +29,13 @@ mol new mutl_open_CA.pdb
 mol addfile output_NVT_timecorrected.xtc first 12800 last 16069
 ```
 
-### Step 2. Modify parameters in `render.tcl` to customize the rendering.
+### Step 2. Modify parameters in `animation/render.tcl` to customize the rendering.
 ### Step 3. Source the script
-        source render.tcl
+        source animation/render.tcl
 
 ## Align all frames to a reference region
 ### Step 1. Source the alignment script
-        source Align_all_frames.tcl
+        source animation/Align_all_frames.tcl
         
 ### Step 2. Specify the region to be aligned, molecule ID and reference frame number
 Example: This command will align all frames of molecule 0 to the reference region defined by residues 331 to 508 and 863 to 1040 in frame 0.
@@ -33,11 +46,11 @@ Example: This command will align all frames of molecule 0 to the reference regio
 ### Step 1. Source the script
 Take pictures while the animation is playing:
 
-        source with_capture.tcl
+        source animation/with_capture.tcl
 
 Or, just play the animation without capturing pictures:
 
-        source without_capture.tcl
+        source animation/without_capture.tcl
         
 Skip steps 2-6 if you have already saved your viewpoints to a file, then:
 
@@ -134,7 +147,7 @@ You can see the example movie here: [MutLα](https://youtu.be/FPb0yXllI84)
 
 ## VMD and Unity viewer
 
-The repository contains an experimental local bridge between VMD and a Unity client. VMD supplies molecular data, representation settings and coordinate snapshots. Unity controls coordinate playback and its own camera; pause and seek synchronize the displayed frame back to VMD. Compatible scenes render directly in Unity, while other scenes use exported VMD meshes. The client runs on the desktop, in the XR Interaction Simulator, or in an OpenXR headset connected to the same computer; see [XR modes](#xr-modes). Headset mode has been run on a Valve Index with SteamVR only; see [VR_ISSUES.md](VR_ISSUES.md) for what was found and for the Meta Quest 3S procedure.
+The repository contains an experimental local bridge between VMD and a Unity client. VMD supplies molecular data, representation settings and coordinate snapshots. Unity controls coordinate playback and its own camera; pause and seek synchronize the displayed frame back to VMD. Compatible scenes render directly in Unity, while other scenes use exported VMD meshes. The client runs on the desktop, in the XR Interaction Simulator, or in an OpenXR headset connected to the same computer; see [XR modes](#xr-modes). Headset mode has been run on a Valve Index with SteamVR only; see [docs/VR_ISSUES.md](docs/VR_ISSUES.md) for what was found and for the Meta Quest procedure.
 
 ### Quick Start
 
@@ -143,7 +156,7 @@ The repository contains an experimental local bridge between VMD and a Unity cli
 
    ```tcl
    cd {C:/path/to/VMD_Animation}
-   source render.tcl
+   source animation/render.tcl
    source start_vr.tcl
    ```
 
@@ -151,10 +164,41 @@ The repository contains an experimental local bridge between VMD and a Unity cli
 3. In Unity Hub, open the `Unity_VR_Client` folder as a project. After import, open `Assets/Scenes/SampleScene.unity` and enter **Play** mode. The Editor uses the XR Interaction Simulator by default, so you can do this check without a headset.
 4. Wait for the molecule and the `[Unity live]` status. A PC without live QuickSurf support can show `[VMD mesh]` instead. Focus the Game view and press **Enter** to start playback. If the status stays at `[Offline]`, check that VMD is still running and the bridge is listening on port `45454`.
 
-For a headset or a Windows build that runs without the Unity Editor, see the [build and launch procedure](VR_ISSUES.md#before-going).
+For a headset or a Windows build that runs without the Unity Editor, see [Build, run, deploy](#build-run-deploy).
+
+### Build, run, deploy
+
+One Windows OpenXR player serves every headset: the PC runs VMD and the viewer and renders, and the headset only displays the picture and sends head and controller input. The same build therefore runs on a Valve Index (SteamVR), on a Meta Quest through Meta Horizon Link / Air Link or the Steam Link app (SteamVR), and in Meta XR Simulator. No Android (standalone Quest) build is made: a standalone app could not reach the bridge, which listens only on `127.0.0.1`.
+
+The OpenXR runtime is chosen for each launch through the `XR_RUNTIME_JSON` environment variable, which the OpenXR loader reads. The system-wide runtime setting, which needs admin rights to change, is never touched.
+
+Run the commands from the repository root in a Command Prompt or PowerShell (`vr help` shows every option):
+
+| Command | What it does |
+| --- | --- |
+| `vr build [-Stereo SPI\|MultiPass\|All]` | Batch-mode Unity build of the Windows player into `Unity_VR_Client/Builds/Windows/<Stereo>/`, through `Assets/Editor/VMDBuild.cs`. Default: Single Pass Instanced. The Unity Editor must not have the project open. Project-settings files that Unity rewrites during the build are restored afterwards. Log: `Builds/logs/build_<Stereo>.log`. |
+| `vr run [-Runtime xrsim\|steamvr\|metalink\|desktop\|<runtime .json>] [-Seconds 60] [-Stop]` | Starts the built player against one runtime (default: Meta XR Simulator), checks that the VMD bridge is listening, follows the player log, prints the mode, the XR start, the molecule placement (`[VMDView]` lines) and the VMD connection, and ends with PASS or FAIL. Arguments after `--` go to the player. Log: `Builds/logs/run_<runtime>_<time>.log`. |
+| `vr deploy [-Target all\|index\|quest] [-SkipBuild]` | Builds SPI and MultiPass, then writes `Builds/deploy/VMD_VR_Lab_<date>_<commit>.zip` for the lab PC: both players, `start_vr.tcl`, the bridge, `animation/render.tcl`, the sample data, `docs/VR_ISSUES.md`, `INSTRUCTIONS.txt` and double-click launchers. |
+| `vr test` | Runs the four bridge regression tests in VMD text mode (see [Validation](#validation)) and summarizes their results. |
+
+Lab bundle launchers (in `tools/bundle/`, copied into every bundle) pick the runtime for that launch only, from the registered OpenXR runtimes (readable without admin rights) or the usual install folders, and say so if none is found:
+
+| Launcher | Headset and runtime |
+| --- | --- |
+| `Start_Index_SteamVR.cmd` | Valve Index, SteamVR. |
+| `Start_Quest_MetaLink.cmd` | Meta Quest over Meta Horizon Link (cable) or Air Link; start Link in the headset first. |
+| `Start_Quest_SteamLink.cmd` | Meta Quest over the Steam Link app (SteamVR); connect Steam Link first. |
+| `Start_Desktop.cmd` | No headset (`-desktop`). |
+
+Add `MultiPass` as the first argument (for example `Start_Index_SteamVR.cmd MultiPass`) to start the Multi-pass player.
+
+**Meta XR Simulator.** `vr run` (default `-Runtime xrsim`) needs Meta XR Simulator for Windows from Meta's download page, which asks you to accept Meta's license. It finds `meta_openxr_simulator.json` through the registered OpenXR runtimes, under `Program Files` or `AppData\Local`, or through the `VMD_XRSIM_JSON` environment variable. The simulator runs on Windows and macOS only; there is no Linux build, so it cannot run in WSL or a Linux container. Its "headless" mode means that Meta's `metavr` command-line tool drives it; the simulator still opens a window.
+
+Environment overrides: `UNITY_EDITOR` (path to `Unity.exe`; by default the version in `ProjectSettings/ProjectVersion.txt` under Unity Hub), `VMD_EXE` (`vmd.exe`), `VMD_XRSIM_JSON`, `VMD_VR_PORT`.
 
 ### Extension folders
 
+- `vr.cmd` and `tools/` hold the [build, run, deploy](#build-run-deploy) command line and the lab bundle templates.
 - `start_vr.tcl` at the repository root starts or reloads the local bridge and prepares Lines/NewCartoon visibility on the top molecule.
 - `VMD_VR_Bridge/` contains the Tcl TCP bridge (`vmd_vr_bridge.tcl` and the modules it sources) and its regression test scripts (`_test_*.tcl`). The bridge is documented in this README and in the scripts' own comments; test runs may leave `_test_bridge_result_*.txt` reports there, which git ignores.
 - `Unity_VR_Client/` contains the Unity 6 client project, including the scene, project settings, input configuration, and C# communication scripts.
@@ -263,7 +307,7 @@ Current scripts under `Assets/Scripts/`:
 | `Trajectory/VMDQuickSurfScene.cs` | QuickSurf rebuilt on the GPU from each frame's atoms (`VMDQuickSurfGrid.compute`, `VMDQuickSurf.shader`). |
 | `Camera/VMDCameraController.cs` | Orbit, pan, zoom and complete-molecule framing. |
 
-`Assets/Resources/VMDStaticGeometry.shader` displays imported colors and material properties. VDW/CPK use reusable Unity spheres/bonds; protein NewCartoon reconstructs its spline and ribbon mesh from each coordinate frame; QuickSurf rebuilds its Gaussian density surface on the GPU from each coordinate frame. These paths share automatic coordinate prefetch and playback controls. Unsupported scenes, and QuickSurf on a device without compute shaders, retain VMD-generated geometry. See [coordinate playback and small-frame testing](Unity_VR_Client/COORDINATE_PLAYBACK.md).
+`Assets/Resources/VMDStaticGeometry.shader` displays imported colors and material properties. VDW/CPK use reusable Unity spheres/bonds; protein NewCartoon reconstructs its spline and ribbon mesh from each coordinate frame; QuickSurf rebuilds its Gaussian density surface on the GPU from each coordinate frame. These paths share automatic coordinate prefetch and playback controls. Unsupported scenes, and QuickSurf on a device without compute shaders, retain VMD-generated geometry. See [coordinate playback and small-frame testing](docs/COORDINATE_PLAYBACK.md).
 
 ### Show or hide NewCartoon (VMD Tk Console)
 
@@ -324,7 +368,7 @@ In Simulator mode the XR Interaction Simulator also reads Space, the arrow keys,
 | Headset | Otherwise, when an OpenXR runtime and headset start. Uncheck **Simulate In Editor** to use a headset from the Editor. | XR Origin tracked by the headset. |
 | Desktop | No OpenXR runtime or headset, or a built player started with `-desktop`. | The desktop camera and [desktop controls](#desktop-controls). |
 
-XR Plug-in Management does not initialize XR on startup, so a missing runtime never blocks Play mode. The bootstrap chooses Headset mode in `Awake` but starts XR a few frames later, after the player has applied its startup window resolution; starting XR earlier made that switch fail ("Couldn't switch to requested monitor resolution") or hang on a PC with both integrated and NVIDIA graphics. If XR does not start, the scene reloads in Desktop mode; the log shows the chosen mode and `XR started.` on success. In Simulator and Headset modes the molecule is scaled to a 0.8 m radius and placed 1.3 m above the floor and 1.5 m in front of the user, along the direction the head faces (SteamVR's play-area forward need not match it). This happens once, when the molecule first appears; drawing-method switches and reconnects keep the user's grabs and scaling, and Recenter fits it again. In Headset mode the first fit waits up to 5 s for a head pose and also turns the molecule's front toward the user. Both values are fields on the component; each fit logs the measured bounds and scale.
+XR Plug-in Management does not initialize XR on startup, so a missing runtime never blocks Play mode. The bootstrap chooses Headset mode in `Awake` but starts XR a few frames later, after the player has applied its startup window resolution; starting XR earlier made that switch fail ("Couldn't switch to requested monitor resolution") or hang on a PC with both integrated and NVIDIA graphics. If XR does not start, the scene reloads in Desktop mode; the log shows the chosen mode and `XR started.` on success. Once XR runs, the bootstrap makes the XR Origin apply the runtime's tracking origin mode: `XROrigin` sets it up in its own `Start`, before XR exists, and would otherwise keep its 1.36 m Device-mode camera height on top of the runtime's floor-relative head pose (seen in Meta XR Simulator as eyes at about 3 m). In Simulator and Headset modes the molecule is scaled to a 0.8 m radius and placed 1.3 m above the floor and 1.5 m in front of the user, along the direction the head faces (SteamVR's play-area forward need not match it). This happens once, when the molecule first appears; drawing-method switches and reconnects keep the user's grabs and scaling, and Recenter fits it again. In Headset mode the first fit waits until the head pose has been steady for 1 s (moved less than 5 cm and turned less than 10°; at most 10 s), so a headset that is still being picked up or put on does not fix the view; it also turns the molecule's front toward the user. When the runtime moves its tracking origin (a system recenter, a new play area), the molecule and the panel are placed again. Size and offset are fields on the component. Each fit logs the measured bounds and scale, and a `[VMDView]` line with the head pose (local and world), the XR Origin pose and the target. After XR starts, a `[VMDView]` line also records the XR Origin's requested and current tracking origin mode, its camera height offset, and what the OpenXR input subsystem reports. Compare these lines between Meta XR Simulator (`vr run`) and a headset's `Player.log` when the view is off.
 
 On Valve Index controllers the grip reports finger curl, so simply holding the controller would keep the molecule grabbed. `VMDIndexGrip` therefore switches grabbing to grip force when an Index controller is present: squeeze firmly to grab, relax the hand to let go. Other controllers keep the grip button.
 
@@ -341,7 +385,7 @@ On Valve Index controllers the grip reports finger curl, so simply holding the c
 | Face buttons | A / B on both controllers | A / B on the right, X / Y on the left |
 | OpenXR controller profile | Valve Index Controller Profile | Meta Quest Touch Plus Controller Profile, or Oculus Touch Controller Profile when the runtime lacks `XR_META_touch_controller_plus` (SteamVR does) |
 
-All three profiles are enabled for the PC build target. [VR_ISSUES.md](VR_ISSUES.md) has the step-by-step launch procedure for each headset.
+All three profiles are enabled for the PC build target. [docs/VR_ISSUES.md](docs/VR_ISSUES.md) has the step-by-step launch procedure for each headset.
 
 **Stereo rendering.** The OpenXR runtime supplies each eye's view and projection, distortion correction and frame timing; Unity renders both eyes into one texture array (OpenXR render mode **Single Pass Instanced**). Every custom shader must therefore carry Unity's stereo-instancing macros (`UNITY_VERTEX_INPUT_INSTANCE_ID`, `UNITY_VERTEX_OUTPUT_STEREO`, `UNITY_SETUP_INSTANCE_ID`, `UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO`, and `UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX` in the fragment shader, which also selects the per-eye `_WorldSpaceCameraPos`); without them the geometry appears in only one eye. The four shaders under `Assets/Resources/` carry them. To rule out a shader problem, switch the render mode to **Multi-pass** under **Project Settings → XR Plug-in Management → OpenXR**, which renders each eye separately at roughly twice the GPU cost.
 
@@ -434,7 +478,7 @@ flowchart TD
     Import -. Scene signature changes while paused .-> Open
 ```
 
-**Unity live compatibility.** One visible top molecule with atoms and frames, and all visible representations must use VDW, CPK, protein NewCartoon or QuickSurf with a supported coloring method, fixed selection and opaque material. Periodic images, smoothing, dynamic selection or color updates, or any unsupported visible representation (such as Lines) select VMD mesh for the whole scene. QuickSurf also requires compute shaders and asynchronous GPU readback. See [coordinate playback](Unity_VR_Client/COORDINATE_PLAYBACK.md#implementation-and-scope) for supported coloring and renderer details.
+**Unity live compatibility.** One visible top molecule with atoms and frames, and all visible representations must use VDW, CPK, protein NewCartoon or QuickSurf with a supported coloring method, fixed selection and opaque material. Periodic images, smoothing, dynamic selection or color updates, or any unsupported visible representation (such as Lines) select VMD mesh for the whole scene. QuickSurf also requires compute shaders and asynchronous GPU readback. See [coordinate playback](docs/COORDINATE_PLAYBACK.md#implementation-and-scope) for supported coloring and renderer details.
 
 **Manual export.** Pause playback and use **Export current VMD scene** or call `RefreshFromVMD()`.
 
@@ -452,11 +496,11 @@ Current behavior and limitations:
 - The Unity NewCartoon coordinate renderer supports CA-only amino-acid models as smooth coils without STRIDE. VMD Wavefront export may still produce empty NewCartoon geometry for CA-only data; use the live route or a complete-backbone structure where appropriate.
 - Once the coordinate buffer is full, `TRAJ_CHECK` validates the snapshot at 0.75-second intervals. The paused mesh route polls the scene signature every 0.5 seconds and coalesces refresh requests. Camera-only changes do not trigger an export. In-place coordinate, radius or bond edits not reflected in scene settings require restarting Play mode.
 - The coordinate buffer defaults to 24 frames and targets 64 MiB of positions, with a minimum of two frames (one for a single-frame molecule). This excludes metadata, rendering buffers and parsing allocations. Requests contain at most four frames, reduced for large molecules. QuickSurf uses a bounded GPU grid and may coarsen its spacing; its surface can lag the displayed coordinate frame.
-- Headset mode has been run on a Valve Index only; a Meta Quest 3S and the changes made after that test are still unverified (see [VR_ISSUES.md](VR_ISSUES.md)). Standalone (untethered) headset apps, atom-picking metadata beyond the domain under the ray and cross-computer mesh transfer remain outside this phase.
+- Headset mode has been run on a Valve Index only; a Meta Quest 3S and the changes made after that test are still unverified (see [docs/VR_ISSUES.md](docs/VR_ISSUES.md)). Standalone (untethered) headset apps, atom-picking metadata beyond the domain under the ray and cross-computer mesh transfer remain outside this phase.
 
 ### Validation
 
-Run tests in separate VMD text processes from `VMD_VR_Bridge/`, not by sourcing them in an active research session. For example, in PowerShell with VMD installed at the default Windows path:
+Run tests in separate VMD text processes from `VMD_VR_Bridge/`, not by sourcing them in an active research session. `vr test` runs all four and summarizes them. By hand, in PowerShell with VMD installed at the default Windows path:
 
 ```powershell
 cd VMD_VR_Bridge
@@ -470,7 +514,7 @@ $env:VMD_COORDINATE_TEST_ROOT = Join-Path $env:TEMP 'VMDCoordinateTests'
 
 The static-export test checks the four drawing methods, complete-backbone NewCartoon, invalid requests, preservation of scene settings, coordinates and frame stepping. Its fixtures, manifests and results are written to `Unity_VR_Client/Temp/static-export-tests/`.
 
-Unity checks under `Unity_VR_Client/Tests/` cover coordinate playback, NewCartoon reconstruction and QuickSurf GPU rendering/fallback in isolated Editor projects. See [coordinate playback verification](Unity_VR_Client/COORDINATE_PLAYBACK.md#verification) for fixture and graphics requirements. These checks do not establish production frame rates or headset readiness. Rerun the applicable tests against the current working tree; historical results are not a current validation guarantee. Game-view comparison on the intended dataset and headset validation remain necessary.
+Unity checks under `Unity_VR_Client/Tests/` cover coordinate playback, NewCartoon reconstruction and QuickSurf GPU rendering/fallback in isolated Editor projects. See [coordinate playback verification](docs/COORDINATE_PLAYBACK.md#verification) for fixture and graphics requirements. These checks do not establish production frame rates or headset readiness. Rerun the applicable tests against the current working tree; historical results are not a current validation guarantee. Game-view comparison on the intended dataset and headset validation remain necessary.
 
 ### Generated files and version control
 

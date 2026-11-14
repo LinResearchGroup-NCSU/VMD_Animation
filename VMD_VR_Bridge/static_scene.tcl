@@ -100,7 +100,7 @@ proc ::vrbridge::scene_limit_quicksurf {} {
         for {set i 0} {$i < [molinfo $molid get numreps]} {incr i} {
             if {![mol showrep $molid $i]} { continue }
             set style [lindex [molinfo $molid get [list [list rep $i]]] 0]
-            # VMD keeps the spelling the rep was created with ("Quicksurf" in render.tcl), and a
+            # VMD keeps the spelling the rep was created with ("Quicksurf" in animation/render.tcl), and a
             # bare name without parameters when the defaults were used. Fill in the same
             # defaults as quicksurf_metadata, so every QuickSurf rep is limited.
             if {![string equal -nocase [lindex $style 0] QuickSurf]} { continue }

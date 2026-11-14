@@ -1,6 +1,8 @@
-source la.tcl
-source orient.tcl
-source visualization.tcl
+# The helper scripts are next to this one, so it works from any working directory.
+set animation_dir [file dirname [file normalize [info script]]]
+source [file join $animation_dir visualization.tcl]
+source [file join $animation_dir la.tcl]
+source [file join $animation_dir orient.tcl]
 
 ##################################################################User-defined Variables##################################################
 set start_frame 70 ;
@@ -11,7 +13,7 @@ set default_speed 1.0
 set key_frame_distance 20 ;#To adjust the animation speed
 set rotation_picture 25; #Take 25 pictures while rotating
 set rotation_speed 300
-set pause_time 35000 ;#Pause time in milliseconds
+set pause_time 3500 ;#Pause time in milliseconds
 set take_picture_interval 50
 
 ###############################################################End of User-defined Variables###############################################
@@ -63,12 +65,12 @@ proc stop_animation {} {
             set from_viewpoint $key_frame_index
             set to_viewpoint [expr {$key_frame_index + 1}]
 
-            #Take picture while rotating
-            move_vp_render $from_viewpoint $to_viewpoint . $rotation_picture smooth
-            #move_vp $from_viewpoint $to_viewpoint $rotation_speed
+            #Rotating
+            #move_vp_render $from_viewpoint $to_viewpoint . $rotation_picture smooth
+            move_vp $from_viewpoint $to_viewpoint $rotation_speed
 
             #Take picture during pause
-            take_picture_loop
+            #take_picture_loop
 
             # Pause for n seconds and then continue 
             after $pause_time "animate goto [expr {$current_frame + 1}]; after 10 stop_animation"
@@ -90,8 +92,8 @@ proc process_frames {} {
     # Handle the first segment before the first key frame
     set first_key [lindex $key_frames 0]
     if {$current_frame < $first_key} {
-        increment $current_frame [expr ($first_key - 1)] 1  ; # set the increment value to 1
-        #increment_np $current_frame [expr ($first_key - 1)] 1
+        #increment $current_frame [expr ($first_key - 1)] 1  ; # set the increment value to 1
+        increment_np $current_frame [expr ($first_key - 1)] 1
         animate forward
     }
     
@@ -105,8 +107,8 @@ proc process_frames {} {
         }
 
         if {$current_frame == [expr {$current_key + 1}]} {
-            increment [expr {$current_key + 1}] [expr {$next_key - 1}] $step_size
-            #increment_np [expr {$current_key + 1}] [expr {$next_key - 1}] $step_size
+            #increment [expr {$current_key + 1}] [expr {$next_key - 1}] $step_size
+            increment_np [expr {$current_key + 1}] [expr {$next_key - 1}] $step_size
             animate forward
         }
     }
@@ -124,7 +126,7 @@ proc take_picture_loop {} {
     }
 
     # Otherwise, take a picture
-    take_picture 
+    take_picture
 
     
     # Schedule the next frame capture

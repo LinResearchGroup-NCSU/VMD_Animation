@@ -23,7 +23,7 @@
 // With a graphics device it also renders the ribbon and writes cartoon-preview.png to the
 // current directory; with -nographics that step is skipped.
 // Each check logs "PASS <name>"; the Editor exits with code 0 when all passed, otherwise 1.
-// See COORDINATE_PLAYBACK.md, section Verification.
+// See docs/COORDINATE_PLAYBACK.md (repository root), section Verification.
 using System;
 using System.Collections.Generic;
 using System.IO;

@@ -5,15 +5,17 @@
         #mol new mutl_open_CA.pdb
         #mol addfile output_NVT_timecorrected.xtc first 12800 last 16069
 #Step 2: Change the parameters in the script to customize the rendering
-#Step 3: source render.tcl
+#Step 3: source animation/render.tcl (from the repository root; any working directory works)
 
 
 #################################################Load file###############################################################
+# The sample files are in ../data relative to this script, so the script works from any working directory.
+set render_data_dir [file join [file dirname [file normalize [info script]]] .. data]
 # "waitfor all" reads every frame before continuing, so VMD does not redraw the scene for each loaded frame.
 # Redrawing is also paused until all representations below are set up.
 display update off
-mol new mutl_open_CA.pdb
-mol addfile Example_Trajectory.xtc first 0 last 2000 waitfor all
+mol new [file join $render_data_dir mutl_open_CA.pdb]
+mol addfile [file join $render_data_dir Example_Trajectory.xtc] first 0 last 2000 waitfor all
 # mol new your_coordinate_file.pdb; #user-defined, see the example above
 # mol addfile your_trajectory_file.xtc first first_frame last last_frame waitfor all; #user-defined, see the example above
 animate goto 0

@@ -23,7 +23,7 @@
 // Run: -batchmode -force-d3d11 -executeMethod QuickSurfPlaybackChecks.Run (GPU path),
 // or -nographics to check the fallback to the VMD mesh route.
 // Each check logs "PASS <name>"; the Editor exits with code 0 when all passed, otherwise 1.
-// See COORDINATE_PLAYBACK.md, section Verification.
+// See docs/COORDINATE_PLAYBACK.md (repository root), section Verification.
 using System;
 using System.Collections.Generic;
 using System.IO;

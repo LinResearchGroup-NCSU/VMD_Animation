@@ -1,0 +1,112 @@
+VMD -> Unity VR viewer: quick start ({{BUNDLE}})
+Full procedure, checks and known issues: docs\VR_ISSUES.md in this folder.
+
+HOW IT WORKS
+   This PC runs VMD and the viewer and renders the picture. The headset only displays it and
+   sends head and controller movement. The same player works for every headset; the Start_*.cmd
+   file you double-click picks the headset's OpenXR runtime for that launch only, so the
+   system-wide runtime setting (which needs admin rights) is never changed.
+
+DEVICE BASIS
+   Placement and controls were tuned on a Valve Index with SteamVR.
+   Meta Quest support is newer; note anything that looks wrong and keep Player.log.
+
+------------------------------------------------------------------------------
+1. EVERY HEADSET: PREPARE
+------------------------------------------------------------------------------
+
+1. Right-click the zip and choose "Extract All". Do not run anything from inside the zip.
+
+2. Open VMD, then Extensions -> Tk Console, and run the three lines below.
+   Use forward slashes, and cd into the extracted VMD_VR_Lab folder (it contains start_vr.tcl).
+
+     cd C:/Users/<user>/Downloads/{{BUNDLE}}/VMD_VR_Lab
+     source animation/render.tcl
+     source start_vr.tcl
+
+   Wait for "VMD-VR bridge listening on localhost:45454".
+   animation/render.tcl loads the sample molecule and builds the three QuickSurf domains.
+   Without it the scene is empty, because start_vr.tcl hides the default Lines.
+
+[[index]]
+------------------------------------------------------------------------------
+2A. VALVE INDEX + STEAMVR
+------------------------------------------------------------------------------
+
+1. Check that the Index link box power light is on, and press the system button on each
+   controller (the small button below the trackpad).
+2. Close SteamVR if it is running, and in Task Manager (Ctrl+Shift+Esc) end any leftover
+   Unity_VR_Client, vrserver, vrmonitor or vrcompositor process.
+3. Double-click Start_Index_SteamVR.cmd.
+   A normal window opens first; about a second later the player starts SteamVR itself.
+   Wait about 30 seconds, then put on the headset.
+
+[[/index]]
+[[quest]]
+------------------------------------------------------------------------------
+2B. META QUEST: CHOOSE ONE CONNECTION
+------------------------------------------------------------------------------
+
+   Meta Horizon Link (USB-C cable, or Air Link over Wi-Fi). Needs the Meta Horizon Link PC
+   app, signed in (ask the lab staff to sign in to the lab account).
+     1. Connect the cable to a USB 3 port at the back of the PC (blue port or USB-C).
+     2. In the headset: Quick Settings -> Link, and launch it. Wait for the Link home.
+     3. Double-click Start_Quest_MetaLink.cmd, then put on the headset.
+
+   Steam Link (Wi-Fi, no Meta PC app needed). The headset and the PC must be on the same
+   network; campus Wi-Fi often blocks this.
+     1. Start Steam on the PC. Do not connect the USB cable.
+     2. In the headset: open the Steam Link app, pick this PC, enter the pairing code shown
+        in the headset into Steam on the PC, then connect. Wait for the SteamVR home.
+     3. Double-click Start_Quest_SteamLink.cmd, then put on the headset.
+
+   Unlike the Index, the connection must be running in the headset BEFORE the player starts.
+   If you only see a grid in the headset while the PC window shows the molecule, note which
+   connection you used and send Player.log (path in section 4).
+
+[[/quest]]
+------------------------------------------------------------------------------
+3. CONTROLS
+------------------------------------------------------------------------------
+
+   Grab, move and rotate the molecule: hold the grip button (Index: squeeze the grip firmly);
+     release to let go. Both grips: scale the molecule.
+   Trigger: press a button on the status panel.
+   Right A: play / pause.            Right B: next drawing method.
+   Right stick left / right: previous / next frame.
+   Back / forward 100 frames: left A / B on the Index, left X / Y on the Quest.
+   Left stick click: put the molecule and the panel back in front of you.
+   Right stick click: immersive size (stand inside the molecule); click again to go back.
+   Highlight: point the right controller at a domain; the rest turns gray. Point away to clear.
+     The panel button "Pointing: On/Off" turns this on and off.
+
+------------------------------------------------------------------------------
+4. IF SOMETHING GOES WRONG
+------------------------------------------------------------------------------
+
+   The Start_*.cmd window says no runtime was found:
+     The headset software is not installed on this PC (SteamVR, or the Meta Horizon Link app).
+   The player opens as a normal window, not in VR:
+     The headset connection was not running when the player started. Close the player
+     (click its window, Alt+F4), start the connection, then the Start_*.cmd file again.
+   The molecule is not in front of you:
+     Click the left stick. It places the molecule again from where you look now.
+   The picture is in one eye only:
+     Close the player and start it with MultiPass: open a command prompt in this folder and run
+     your Start_*.cmd file with MultiPass after it, for example
+       Start_Quest_MetaLink.cmd MultiPass
+   The panel says "Connecting to VMD":
+     Run "source start_vr.tcl" again in VMD. The player reconnects by itself.
+   No headset at all:
+     Double-click Start_Desktop.cmd.
+   Log file (send it after every test):
+     C:\Users\<user>\AppData\LocalLow\DefaultCompany\Unity_VR_Client\Player.log
+     (paste that path into the File Explorer address bar; Win+R may be blocked)
+
+------------------------------------------------------------------------------
+5. BEFORE LEAVING
+------------------------------------------------------------------------------
+
+   Copy Player.log. Delete the extracted folder and the zip, and empty the Recycle Bin.
+   Sign out of Google in the browser and of any personal Steam or Meta account.
+   Sign out of Windows.

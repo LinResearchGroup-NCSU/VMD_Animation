@@ -121,7 +121,7 @@ proc ::vrbridge::trajectory_metadata {owner} {
         if {![mol showrep $m $r]} { continue }
         lassign [molinfo $m get [list [list rep $r] [list selection $r] [list color $r] [list material $r]]] style selection coloring material
         set method [lindex $style 0]
-        # render.tcl's "mol representation Quicksurf" keeps VMD's alternate spelling.
+        # animation/render.tcl's "mol representation Quicksurf" keeps VMD's alternate spelling.
         if {[string equal -nocase $method QuickSurf]} { set method QuickSurf }
         if {$method ni {VDW CPK NewCartoon QuickSurf}} { error "Representation $method uses the existing renderer" }
         if {[mol selupdate $r $m] || [mol colupdate $r $m]} { error "Dynamic selections/colors use the existing renderer" }
@@ -156,7 +156,7 @@ proc ::vrbridge::trajectory_metadata {owner} {
             }
             # Style element 1 is the sphere scale; for CPK, element 2 is the bond radius.
             # The 0.25 factors for CPK follow VMD's own CPK drawing code (see the links at
-            # the end of Unity_VR_Client/COORDINATE_PLAYBACK.md).
+            # the end of docs/COORDINATE_PLAYBACK.md).
             set sphere [lindex $style 1]
             set bond 0
             if {$method eq "CPK"} {

@@ -3,8 +3,15 @@
 /Unity_VR_Client/[Tt]emp/
 # Temp includes static-export-tests/ (OBJ/MTL test fixtures); bridge exports live in %LOCALAPPDATA%/VMD_VR/exports.
 /Unity_VR_Client/[Oo]bj/
-/Unity_VR_Client/[Bb]uild/
-/Unity_VR_Client/[Bb]uilds/
+# Player builds in any Build*/ folder (Builds, Builds_Quest, BuildAndroid, ...), in the
+# Unity project or at the repository root, plus stray Android packages anywhere.
+/Unity_VR_Client/[Bb]uild*/
+/[Bb]uild*/
+*.apk
+*.aab
+*.apk.symbols.zip
+# Unity 6 temporary folder
+/Unity_VR_Client/.utmp/
 /Unity_VR_Client/[Ll]ogs/
 /Unity_VR_Client/[Uu]ser[Ss]ettings/
 /Unity_VR_Client/[Mm]emoryCaptures/

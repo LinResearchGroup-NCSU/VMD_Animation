@@ -4,7 +4,7 @@
 # Run in a separate VMD text process from the VMD_VR_Bridge directory; the paths below are
 # relative to it. From PowerShell:
 #   & 'C:\Program Files\VMD\vmd.exe' -dispdev text -e ./_test_static_export.tcl -eofexit
-# It needs ../mutl_open_CA.pdb and a VMD build with the Wavefront renderer. Every request
+# It needs ../data/mutl_open_CA.pdb and a VMD build with the Wavefront renderer. Every request
 # waits 2.1 s for the export cooldown. The script ends with quit.
 #
 # It checks that:
@@ -53,7 +53,7 @@ fconfigure $report -buffering line
 if {[catch {
     assert {[::vrbridge::handle_command PING] eq "PONG"} "PING regression"
     # Part 1: switch rep 0 (the first 32 atoms, ColorID 1) through the four drawing methods.
-    set molid [mol new ../mutl_open_CA.pdb waitfor all]
+    set molid [mol new ../data/mutl_open_CA.pdb waitfor all]
     axes location Off
     mol modcolor 0 $molid ColorID 1
     mol modselect 0 $molid {index 0 to 31}

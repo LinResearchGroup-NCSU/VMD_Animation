@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using Unity.XR.CoreUtils;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.EventSystems;
@@ -26,12 +27,21 @@ using UnityEngine.XR.Management;
 //   had applied its startup window resolution, made that resolution switch fail or hang on a PC
 //   with both integrated and NVIDIA graphics.
 // - If XR does not start, the scene reloads once in Desktop mode.
+// - Once XR runs, ApplyTrackingOrigin makes the XR Origin apply the runtime's tracking origin mode,
+//   which XROrigin's own Start could not do before XR existed (wrong eye height otherwise).
 //
 // Placement: when the molecule first appears it is turned toward the user, scaled and placed in
-// front of the head (LateUpdate, FitMolecule). Recenter and ToggleImmersive place it again.
+// front of the head (LateUpdate, FitMolecule). In Headset mode the first placement waits until the
+// head pose has been steady for a second, so a headset that is still being picked up or put on
+// does not fix the view. Recenter and ToggleImmersive place it again, and so does a change of the
+// runtime's tracking origin (for example a system recenter with the headset's menu button).
 //
-// Placement defaults were tuned on a Valve Index and apply to every headset. See VR_ISSUES.md
-// for the tested hardware and headset launch procedures.
+// Viewpoint diagnostics: every placement and the tracking origin setup are logged with the prefix
+// "[VMDView]" (head, origin and target poses, requested and current tracking origin mode), so a
+// simulator run and a headset Player.log can be compared line by line. "vr run" prints them.
+//
+// Placement defaults were tuned on a Valve Index and apply to every headset. See
+// docs/VR_ISSUES.md for the tested hardware and headset launch procedures.
 [DefaultExecutionOrder(-1000)]
 public class VMDXRBootstrap : MonoBehaviour
 {
@@ -89,10 +99,28 @@ public class VMDXRBootstrap : MonoBehaviour
     private bool startedXR, fitted, oriented, immersive;
     // Frame at which to fit again, -1 when no fit is pending.
     private int refitFrame = -1;
-    // The first fit waits for a head pose (at most this long), so it lands where the user is
+    // The first fit waits for a steady head pose (at most this long), so it lands where the user is
     // looking; headWaitUntil is the deadline.
-    private const float HeadPoseWaitSeconds = 5f;
+    private const float HeadPoseWaitSeconds = 10f;
     private float headWaitUntil;
+    // Steady: the head moved less than HeadSettleMeters and turned less than HeadSettleDegrees
+    // during the last HeadSettleSeconds. settleSince is -1 while the head is untracked.
+    private const float HeadSettleSeconds = 1f;
+    private const float HeadSettleMeters = 0.05f;
+    private const float HeadSettleDegrees = 10f;
+    private float settleSince = -1f;
+    private Vector3 settlePosition;
+    private Quaternion settleRotation;
+    // Why the next fit happens, for the [VMDView] log line.
+    private string placementReason = "first placement";
+    // Input subsystems whose trackingOriginUpdated this component listens to; originChanged is set
+    // by that event and handled in LateUpdate.
+    private readonly List<UnityEngine.XR.XRInputSubsystem> inputSubsystems = new List<UnityEngine.XR.XRInputSubsystem>();
+    private bool originChanged;
+    // Headset mode: the XR Origin has applied the runtime's tracking origin (ApplyTrackingOrigin),
+    // so head poses have their final height. The first placement waits for it.
+    private bool originReady;
+    private const float TrackingOriginWaitSeconds = 3f;
 
     // Choose the mode, enable the camera rig for it (the other rig stays inactive), and in
     // Simulator and Headset modes add the XR components listed in the header.
@@ -146,6 +174,9 @@ public class VMDXRBootstrap : MonoBehaviour
         {
             headWaitUntil = Time.unscaledTime + HeadPoseWaitSeconds;
             Debug.Log("[VMDXRBootstrap] XR started.", this);
+            HookTrackingOrigin();
+            yield return ApplyTrackingOrigin();
+            LogTrackingSetup("XR started");
             yield break;
         }
         forceDesktop = true;
@@ -203,8 +234,19 @@ public class VMDXRBootstrap : MonoBehaviour
     {
         if (ActiveMode == Mode.Desktop || molecule == null || xrOrigin == null)
             return;
-        // Headset: wait until XR has started and the head is tracked, or the wait has run out.
-        if (!oriented && ActiveMode == Mode.Headset && (!startedXR || (!HeadTracked() && Time.unscaledTime < headWaitUntil)))
+        // The runtime moved the tracking origin (system recenter, new play area): place again.
+        if (originChanged)
+        {
+            originChanged = false;
+            LogTrackingSetup("Tracking origin changed");
+            if (fitted)
+            {
+                Recenter();
+                placementReason = "tracking origin changed";
+            }
+        }
+        // Headset: wait until XR has started and the head pose is steady, or the wait has run out.
+        if (!oriented && ActiveMode == Mode.Headset && (!startedXR || !originReady || (!HeadSettled() && Time.unscaledTime < headWaitUntil)))
             return;
         // Nothing is drawn yet.
         if (!VMDCameraController.TryGetMoleculeBounds(molecule, renderers, out Bounds bounds))
@@ -232,6 +274,7 @@ public class VMDXRBootstrap : MonoBehaviour
     {
         if (ActiveMode == Mode.Desktop || molecule == null || xrOrigin == null)
             return;
+        placementReason = "recenter";
         molecule.transform.rotation = ViewRotation();
         // The bounds are recomputed in this frame's LateUpdate, after this one, so fit on the
         // next frame.
@@ -250,6 +293,7 @@ public class VMDXRBootstrap : MonoBehaviour
         immersive = !immersive;
         Debug.Log($"[VMDXRBootstrap] {(immersive ? "Immersive" : "In-front")} size.", this);
         Recenter();
+        placementReason = immersive ? "immersive size" : "in-front size";
     }
 
     // Whether the head camera has a pose yet: an untracked XR camera sits at its Camera Offset's
@@ -258,6 +302,117 @@ public class VMDXRBootstrap : MonoBehaviour
     {
         Camera head = Camera.main;
         return head != null && head.transform.localPosition.sqrMagnitude > 1e-6f;
+    }
+
+    // Whether the head is tracked and has stayed within HeadSettleMeters / HeadSettleDegrees of one
+    // pose for HeadSettleSeconds. Called every frame until the first placement.
+    private bool HeadSettled()
+    {
+        if (!HeadTracked())
+        {
+            settleSince = -1f;
+            return false;
+        }
+        Transform head = Camera.main.transform;
+        float now = Time.unscaledTime;
+        if (settleSince < 0f ||
+            Vector3.Distance(head.localPosition, settlePosition) > HeadSettleMeters ||
+            Quaternion.Angle(head.localRotation, settleRotation) > HeadSettleDegrees)
+        {
+            settleSince = now;
+            settlePosition = head.localPosition;
+            settleRotation = head.localRotation;
+            return false;
+        }
+        return now - settleSince >= HeadSettleSeconds;
+    }
+
+    // Make the XR Origin apply the runtime's tracking origin mode now that XR is running, then allow
+    // the first placement (originReady).
+    //
+    // XROrigin sets its tracking origin up in its own Start. XR starts later here (see the header),
+    // so at that point there is no input subsystem yet; XROrigin takes that as done and never tries
+    // again. Its Camera Offset then keeps the Device-mode height (Camera Y Offset, 1.36 m) while the
+    // runtime reports floor-relative head poses, which put the eyes about 1.4 m too high: seen in Meta
+    // XR Simulator (Quest 3 profile) as a head at 3.06 m and the molecule far below eye level.
+    // Assigning RequestedTrackingOriginMode makes XROrigin set up again; the runtime may need a few
+    // frames before it reports its mode, so retry until it does or the wait runs out.
+    private IEnumerator ApplyTrackingOrigin()
+    {
+        XROrigin origin = xrOrigin != null ? xrOrigin.GetComponent<XROrigin>() : null;
+        float deadline = Time.unscaledTime + TrackingOriginWaitSeconds;
+        while (origin != null)
+        {
+            origin.RequestedTrackingOriginMode = origin.RequestedTrackingOriginMode;
+            if (origin.CurrentTrackingOriginMode != UnityEngine.XR.TrackingOriginModeFlags.Unknown)
+                break;
+            if (Time.unscaledTime >= deadline)
+            {
+                Debug.LogWarning("[VMDView] The runtime reported no tracking origin mode; the camera height may be wrong.", this);
+                break;
+            }
+            yield return null;
+        }
+        originReady = true;
+    }
+
+    // Listen for the runtime moving the tracking origin (system recenter, new play area).
+    private void HookTrackingOrigin()
+    {
+        UnhookTrackingOrigin();
+        SubsystemManager.GetSubsystems(inputSubsystems);
+        foreach (UnityEngine.XR.XRInputSubsystem subsystem in inputSubsystems)
+            subsystem.trackingOriginUpdated += OnTrackingOriginUpdated;
+    }
+
+    private void UnhookTrackingOrigin()
+    {
+        foreach (UnityEngine.XR.XRInputSubsystem subsystem in inputSubsystems)
+            if (subsystem != null)
+                subsystem.trackingOriginUpdated -= OnTrackingOriginUpdated;
+        inputSubsystems.Clear();
+    }
+
+    private void OnTrackingOriginUpdated(UnityEngine.XR.XRInputSubsystem subsystem) => originChanged = true;
+
+    // [VMDView] line with the XR Origin's requested and current tracking origin mode, the camera
+    // height offset and what each input subsystem reports.
+    private void LogTrackingSetup(string when)
+    {
+        var text = new System.Text.StringBuilder($"[VMDView] {when}:");
+        XROrigin origin = xrOrigin != null ? xrOrigin.GetComponent<XROrigin>() : null;
+        if (origin != null)
+        {
+            text.Append($" requested origin {origin.RequestedTrackingOriginMode}, current {origin.CurrentTrackingOriginMode},");
+            text.Append($" camera Y offset {origin.CameraYOffset:F2} m");
+            if (origin.CameraFloorOffsetObject != null)
+                text.Append($", camera offset object at {origin.CameraFloorOffsetObject.transform.localPosition.ToString("F2")}");
+        }
+        else
+            text.Append(" no XROrigin component");
+        SubsystemManager.GetSubsystems(inputSubsystems);
+        foreach (UnityEngine.XR.XRInputSubsystem subsystem in inputSubsystems)
+            text.Append($"; input subsystem '{subsystem.subsystemDescriptor?.id}': origin {subsystem.GetTrackingOriginMode()}, supported {subsystem.GetSupportedTrackingOriginModes()}");
+        Debug.Log(text.ToString(), this);
+    }
+
+    // [VMDView] line for one placement: head pose (local to the XR Origin and in the world), origin
+    // pose and where the molecule's center went.
+    private void LogPlacement(Vector3 target, float targetRadius)
+    {
+        Camera head = Camera.main;
+        string headText = "no head camera";
+        if (head != null)
+        {
+            Transform h = head.transform;
+            headText = $"head local {h.localPosition.ToString("F2")}, world {h.position.ToString("F2")}, " +
+                       $"yaw {h.eulerAngles.y:F0}, pitch {Mathf.DeltaAngle(0f, h.eulerAngles.x):F0}, roll {Mathf.DeltaAngle(0f, h.eulerAngles.z):F0}, " +
+                       $"tracked {HeadTracked()}";
+        }
+        Transform origin = xrOrigin.transform;
+        Debug.Log($"[VMDView] Placed ({placementReason}, {(immersive ? "immersive" : "in front")}): {headText}; " +
+                  $"origin {origin.position.ToString("F2")} yaw {origin.eulerAngles.y:F0}; target {target.ToString("F2")}, radius {targetRadius} m; " +
+                  $"t={Time.unscaledTime:F1} s.", this);
     }
 
     // The head's horizontal heading around the XR Origin's up axis; the origin's forward without a
@@ -320,6 +475,8 @@ public class VMDXRBootstrap : MonoBehaviour
         root.position = target - (bounds.center - root.position) * factor;
         root.localScale *= factor;
         fitted = true;
+        LogPlacement(target, targetRadius);
+        placementReason = "refit";
         // Bounds before fitting, for diagnosing an unexpected size or shape on the headset.
         Debug.Log($"[VMDXRBootstrap] Fitted molecule: bounds size {bounds.size}, radius {radius:F3} -> {targetRadius} m, " +
                   $"scale x{factor:G4}, lossyScale {root.lossyScale}, center {target}.", this);
@@ -328,6 +485,7 @@ public class VMDXRBootstrap : MonoBehaviour
     // Shut down XR only if this bootstrap started it.
     private void OnDestroy()
     {
+        UnhookTrackingOrigin();
         ActiveMode = Mode.Desktop;
         if (!startedXR)
             return;
