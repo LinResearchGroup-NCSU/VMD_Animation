@@ -103,3 +103,11 @@ animate.[0-9][0-9][0-9][0-9]*.png
 *.swp
 *.swo
 *~
+
+# Local test data in data/ (only the sample files below are tracked)
+/data/*
+!/data/mutl_open_CA.pdb
+!/data/Example_Trajectory.xtc
+!/data/MutLa_for_Presentation.mp4
+# Local test/demo render script for the data/ test files above
+/animation/render_nucleosome_example.tcl

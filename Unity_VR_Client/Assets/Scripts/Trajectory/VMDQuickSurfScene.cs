@@ -27,6 +27,8 @@ using UnityEngine.Rendering;
 // VMDQuickSurf shader draws them straight from a GPU buffer, without a Mesh or a Renderer.
 public sealed class VMDQuickSurfScene : MonoBehaviour
 {
+    // animation/split_large_reps.tcl copies GaussianLimit, MaxCells, MaxTriangles and VertexStride
+    // to decide when a large QuickSurf rep must be split; keep it in sync when these change.
     // Gaussian cutoff, in units of the scaled atom radius, for VMD surface quality 0..3.
     private static readonly float[] GaussianLimit = { 2.0f, 2.5f, 3.0f, 3.5f };
     // Largest density grid in grid points (about 4.2 million); a build that would
