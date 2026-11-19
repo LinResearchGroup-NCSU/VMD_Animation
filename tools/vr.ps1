@@ -18,13 +18,19 @@
         The Unity Editor must not have the project open.
 
     run    [-Runtime xrsim|steamvr|metalink|desktop|<path to runtime .json>] [-Stereo SPI|MultiPass]
-           [-Seconds 60] [-Stop] [-- <extra player arguments>]
+           [-Seconds 60] [-Stop] [-PlayerArgs "<extra player arguments>"]
         Starts the built player against the chosen runtime, follows its log and prints a summary.
-        Default runtime: xrsim (Meta XR Simulator).
+        Default runtime: xrsim (Meta XR Simulator). With xrsim the player renders with Vulkan
+        (-force-vulkan): the simulator has no direct D3D11 renderer, and its D3D11-to-Vulkan
+        conversion gave black frames on an Intel GPU. Headset runtimes keep D3D11.
+        -PlayerArgs takes one quoted string, e.g. -PlayerArgs "-vmdPort 45455 -force-d3d11".
 
-    deploy [-Target all|index|quest] [-SkipBuild]
+    deploy [-Target all|index|quest] [-SkipBuild] [-LocalExamples]
         Builds SPI and MultiPass (unless -SkipBuild) and writes the lab bundle
         Unity_VR_Client\Builds\deploy\VMD_VR_Lab_<date>_<commit>.zip with double-click launchers.
+        -LocalExamples also packs the local examples, that is the git-ignored animation\*.tcl
+        scripts and data\ files (not movies or subfolders), and lists them in EXTRA_EXAMPLES.txt;
+        the name ends in _examples.
 
     test
         Runs the VMD bridge regression tests (VMD_VR_Bridge\_test_*.tcl) in VMD text mode.
@@ -48,10 +54,11 @@ param(
     [ValidateSet('all', 'index', 'quest')]
     [string]$Target = 'all',
     [switch]$SkipBuild,
+    [switch]$LocalExamples,
     [switch]$KeepSettingsChanges,
 
-    [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]]$PlayerArgs
+    # One quoted string: "powershell -File" (used by vr.cmd) cannot pass a "--" separator.
+    [string]$PlayerArgs = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -245,10 +252,13 @@ function Find-RuntimeJson([string]$Kind) {
 # run
 # ---------------------------------------------------------------------------------------------
 
+# -PlayerArgs split into separate arguments (whitespace-separated; no quoting inside).
+function Get-PlayerArgList { @($PlayerArgs -split '\s+' | Where-Object { $_ }) }
+
 function Get-BridgePort {
     $port = 45454
     if ($env:VMD_VR_PORT -match '^\d+$') { $port = [int]$env:VMD_VR_PORT }
-    $extra = @($PlayerArgs | Where-Object { $_ })
+    $extra = @(Get-PlayerArgList)
     for ($i = 0; $i -lt $extra.Count - 1; $i++) {
         if ($extra[$i] -ieq '-vmdPort' -and $extra[$i + 1] -match '^\d+$') { $port = [int]$extra[$i + 1] }
     }
@@ -285,7 +295,11 @@ function Invoke-Run {
 
     $arguments = @('-logFile', $log)
     if ($desktop) { $arguments += '-desktop' }
-    $arguments += @($PlayerArgs | Where-Object { $_ })
+    $extra = @(Get-PlayerArgList)
+    # Meta XR Simulator renders through Vulkan; give it Vulkan frames unless a graphics API was chosen.
+    $isXrsim = $runtimeJson -and ((Split-Path -Leaf $runtimeJson) -ieq $RuntimeFiles['xrsim'])
+    if ($isXrsim -and -not ($extra | Where-Object { $_ -match '^-force-(d3d11|d3d12|vulkan|glcore)' })) { $arguments += '-force-vulkan' }
+    $arguments += $extra
 
     $info = New-Object System.Diagnostics.ProcessStartInfo
     $info.FileName = $player
@@ -401,6 +415,7 @@ function Invoke-Deploy {
     if ($dirty) { $commit += '-dirty' }
     $name = 'VMD_VR_Lab_{0}_{1}' -f (Get-Date -Format 'yyyyMMdd'), $commit
     if ($Target -ne 'all') { $name += "_$Target" }
+    if ($LocalExamples) { $name += '_examples' }
     $deployRoot = Join-Path $Builds 'deploy'
     $staging = Join-Path $deployRoot $name
     $bundle = Join-Path $staging 'VMD_VR_Lab'
@@ -415,9 +430,29 @@ function Invoke-Deploy {
     Get-ChildItem -LiteralPath (Join-Path $Root 'VMD_VR_Bridge') -Filter '*.tcl' | Where-Object { $_.Name -notlike '_test_*' } |
         ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $bridge.FullName }
     $animation = New-Item -ItemType Directory -Force -Path (Join-Path $bundle 'animation')
-    Copy-Item -LiteralPath (Join-Path $Root 'animation\render.tcl') -Destination $animation.FullName
+    foreach ($file in @('render.tcl', 'split_large_reps.tcl')) { Copy-Item -LiteralPath (Join-Path $Root "animation\$file") -Destination $animation.FullName }
     $data = New-Item -ItemType Directory -Force -Path (Join-Path $bundle 'data')
     foreach ($file in @('mutl_open_CA.pdb', 'Example_Trajectory.xtc')) { Copy-Item -LiteralPath (Join-Path $Root "data\$file") -Destination $data.FullName }
+    if ($LocalExamples) {
+        # Local examples are the git-ignored files, taken from this checkout as they are. The
+        # tracked animation scripts are movie tools, not VR examples, and are left out.
+        $ignored = @(& git -C $Root ls-files --others --ignored --exclude-standard -- animation data)
+        $extraScripts = @($ignored | Where-Object { $_ -match '^animation/[^/]+\.tcl$' } | ForEach-Object { Get-Item -LiteralPath (Join-Path $Root $_) })
+        $extraScripts | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $animation.FullName }
+        $extraData = @($ignored | Where-Object { $_ -match '^data/[^/]+$' -and $_ -notmatch '\.mp4$' } | ForEach-Object { Get-Item -LiteralPath (Join-Path $Root $_) })
+        $extraData | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $data.FullName }
+        $lines = @('Extra examples in this bundle (local test data, not in the repository).', '',
+            'In the VMD Tk Console, after cd to this folder (see INSTRUCTIONS.txt), run one of these',
+            'instead of "source animation/render.tcl", then "source start_vr.tcl":', '')
+        foreach ($script in $extraScripts) { $lines += "  source animation/$($script.Name)" }
+        $lines += @('', 'A large system that looks coarse in the headset can be split into smaller QuickSurf',
+            'reps first (see the comments at the top of animation/split_large_reps.tcl), for example:', '',
+            '  source animation/split_large_reps.tcl', '  split_large_reps top -unit block 1268', '',
+            'unsplit_large_reps restores the original reps.', '', 'Data files:')
+        foreach ($file in $extraData) { $lines += "  data/$($file.Name)" }
+        [System.IO.File]::WriteAllText((Join-Path $bundle 'EXTRA_EXAMPLES.txt'), (($lines -join "`r`n") + "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+        Write-Ok ('Local examples: ' + ((@($extraScripts | ForEach-Object Name) + @($extraData | ForEach-Object Name)) -join ', '))
+    }
     $docs = New-Item -ItemType Directory -Force -Path (Join-Path $bundle 'docs')
     Copy-Item -LiteralPath (Join-Path $Root 'docs\VR_ISSUES.md') -Destination $docs.FullName
 

@@ -9,8 +9,9 @@ using UnityEngine.InputSystem;
 // - RepresentationController: switches the drawing method; VMD applies it and Unity redraws.
 // - VMDXRBootstrap: chooses the mode, adds this component in Simulator and Headset modes, and
 //   places the molecule in front of the user (Recenter, ToggleImmersive).
-// - VMDMoleculeGrab / XR Interaction Toolkit: grip grabs, moves, rotates and scales the molecule;
-//   the controller ray only points at what grip or trigger act on.
+// - VMDMoleculeGrab / XR Interaction Toolkit: the grip (the trigger on Index controllers, see
+//   VMDIndexGrip) grabs, moves, rotates and scales the molecule; the controller ray only points at
+//   what grip or trigger act on.
 // - VMDStatusPanel: the panel buttons, pressed with a ray and the trigger, including Highlight.
 //
 // Bindings use OpenXR usages, so Quest Touch, Index, Vive and the XR Interaction Simulator agree:

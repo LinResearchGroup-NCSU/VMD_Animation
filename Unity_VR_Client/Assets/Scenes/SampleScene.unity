@@ -938,7 +938,7 @@ MonoBehaviour:
   interactionSimulator: {fileID: 590401873}
   simulateInEditor: 1
   molecule: {fileID: 1147326088}
-  moleculeOffset: {x: 0, y: 1.3, z: 1.5}
+  moleculeOffsetFromEye: {x: 0, y: -0.15, z: 1.5}
   moleculeRadius: 0.8
   immersiveRadius: 4
   immersiveCenterAhead: 0.3

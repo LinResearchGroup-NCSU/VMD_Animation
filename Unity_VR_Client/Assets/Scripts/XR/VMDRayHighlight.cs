@@ -12,7 +12,12 @@ using UnityEngine.XR.Interaction.Toolkit.Interactors.Visuals;
 // 2. The first of those atoms along the ray is found (Pick): for QuickSurf where the ray enters
 //    the drawn surface, for VDW and CPK where it enters the drawn sphere, for NewCartoon within
 //    pickRadius angstroms of the ray. Surfaces and spheres that contain the hand are passed
-//    through.
+//    through, and the structure that contains the hand is not picked by itself: only what the
+//    ray enters counts. (Until 2026-11-17 a ray that met nothing picked the structure containing
+//    the hand; at immersive size the hand is nearly always inside one, so the highlight seemed
+//    stuck on it.)
+//    Every change of the pointed structure is logged with the prefix "[VMDHighlight]": what the
+//    ray hit (surface, atom or nothing) and which structure contains the hand.
 // While the toolkit hides its own ray (hand inside the molecule), a pointer line shows the aim.
 // 3. The entry that contains that atom is highlighted (ShowStructure); pointing at another entry
 //    switches to it. When the ray leaves the molecule, the highlight is cleared after
@@ -63,10 +68,13 @@ public class VMDRayHighlight : MonoBehaviour
         }
         bool hasRay = TryGetRay(out Ray worldRay);
         hitDistance = float.PositiveInfinity;
+        hitKind = "nothing";
+        handStructure = -1;
         int target = Target(hasRay, worldRay);
         ShowPointer(hasRay, worldRay);
         if (highlight == null)
             return;
+        LogTarget(target);
 
         if (target >= 0)
         {
@@ -97,10 +105,11 @@ public class VMDRayHighlight : MonoBehaviour
     // - Other atoms: the drawn VDW/CPK sphere, or pickRadius around a NewCartoon atom
     //   (VMDCoordinateScene.TryPickAtom).
     // Surfaces and spheres that contain the hand are passed through, so at immersive size the
-    // ray picks what it points at. When it meets nothing else, the QuickSurf structure that
-    // contains the hand is picked.
+    // ray picks what it points at. The QuickSurf structure that contains the hand is only
+    // recorded for the log (handStructure), not picked.
     private int Pick(VMDCoordinateScene scene, int[] atoms, Ray worldRay)
     {
+        hitKind = "nothing";
         VMDQuickSurfScene surface = scene.GetComponent<VMDQuickSurfScene>();
         bool[] drawnAsSurface = surface != null ? surface.SurfaceAtoms : null;
         int best = -1, inside = -1;
@@ -112,6 +121,7 @@ public class VMDRayHighlight : MonoBehaviour
             {
                 best = surfaceAtom;
                 bestDistance = surfaceDistance;
+                hitKind = "surface";
             }
             inside = insideAtom;
         }
@@ -121,12 +131,30 @@ public class VMDRayHighlight : MonoBehaviour
         {
             best = atom;
             bestDistance = distance;
+            hitKind = "atom";
         }
-        if (best < 0)
-            best = inside;
-        else
+        handStructure = inside >= 0 ? highlight.StructureOf(inside) : -1;
+        if (best >= 0)
             hitDistance = bestDistance;
         return best >= 0 ? highlight.StructureOf(best) : -1;
+    }
+
+    // What the last Pick hit ("surface", "atom" or "nothing") and the structure that contains the
+    // hand (-1 for none), for the [VMDHighlight] log line.
+    private string hitKind = "nothing";
+    private int handStructure = -1;
+    // The pointed structure last logged; int.MinValue before the first line.
+    private int loggedTarget = int.MinValue;
+
+    // Log a change of the pointed structure (not every frame).
+    private void LogTarget(int target)
+    {
+        if (target == loggedTarget)
+            return;
+        loggedTarget = target;
+        Debug.Log($"[VMDHighlight] Ray on {(target >= 0 ? "structure " + target : "nothing")} (hit {hitKind}); " +
+                  $"hand inside {(handStructure >= 0 ? "structure " + handStructure : "none")}; " +
+                  $"immersive {VMDXRBootstrap.Immersive}; t={Time.unscaledTime:F1} s.", this);
     }
 
     // The structure the ray points at this frame, -1 for none or while the molecule, the

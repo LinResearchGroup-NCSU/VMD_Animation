@@ -69,11 +69,14 @@ DEVICE BASIS
 3. CONTROLS
 ------------------------------------------------------------------------------
 
-   Grab, move and rotate the molecule: hold the grip button (Index: squeeze the grip firmly);
-     release to let go. Both grips: scale the molecule.
+   Grab, move and rotate the molecule: point at it and hold the TRIGGER on the Index (the grip
+     button on a Quest); let go to release. Both hands on it: move them apart to make it bigger.
    Trigger: press a button on the status panel.
+   Move the status panel: point at the blue bar on top of it and grab it like the molecule.
+   The status panel also lists these controls.
    Right A: play / pause.            Right B: next drawing method.
    Right stick left / right: previous / next frame.
+   Too fast? Press the "Speed" button on the status panel: 1x, 0.5x, 0.25x, 2x, then 1x again.
    Back / forward 100 frames: left A / B on the Index, left X / Y on the Quest.
    Left stick click: put the molecule and the panel back in front of you.
    Right stick click: immersive size (stand inside the molecule); click again to go back.
@@ -92,9 +95,10 @@ DEVICE BASIS
    The molecule is not in front of you:
      Click the left stick. It places the molecule again from where you look now.
    The picture is in one eye only:
-     Close the player and start it with MultiPass: open a command prompt in this folder and run
-     your Start_*.cmd file with MultiPass after it, for example
-       Start_Quest_MetaLink.cmd MultiPass
+     The Start_*.cmd files start the Multi-pass player, which draws each eye separately. If you
+     started SPI\Unity_VR_Client.exe directly, or a Start_*.cmd file with SPI after it, close the
+     player and double-click the Start_*.cmd file instead. (The SPI player showed one eye only on
+     a Valve Index. It is kept for comparison: Start_Index_SteamVR.cmd SPI in a command prompt.)
    The panel says "Connecting to VMD":
      Run "source start_vr.tcl" again in VMD. The player reconnects by itself.
    No headset at all:

@@ -1,16 +1,18 @@
 @echo off
 rem Starts the VR player with one OpenXR runtime, chosen for this launch only.
-rem Usage: run_player.cmd steamvr|metalink|desktop [MultiPass] [extra player arguments]
+rem Usage: run_player.cmd steamvr|metalink|desktop [MultiPass|SPI] [extra player arguments]
 rem   steamvr   Valve Index, or Meta Quest through Steam Link (SteamVR runtime)
 rem   metalink  Meta Quest through Meta Horizon Link or Air Link (Meta runtime)
 rem   desktop   no headset; a normal window
 rem The runtime is passed to the player through XR_RUNTIME_JSON, so the system-wide OpenXR
 rem runtime (which needs admin rights to change) stays as it is.
+rem The Multi-pass player is the default: the Single Pass Instanced (SPI) player showed the picture in
+rem one eye only on a Valve Index (2026-11-17). Pass SPI as the second argument to start it instead.
 setlocal EnableDelayedExpansion
 
 set "KIND=%~1"
-set "STEREO=SPI"
-if /i "%~2"=="MultiPass" set "STEREO=MultiPass"
+set "STEREO=MultiPass"
+if /i "%~2"=="SPI" set "STEREO=SPI"
 set "PLAYER=%~dp0%STEREO%\Unity_VR_Client.exe"
 if not exist "%PLAYER%" (
     echo The player was not found: %PLAYER%

@@ -8,6 +8,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
 using UnityEngine.XR.Interaction.Toolkit.UI;
 using UnityEngine.XR.Management;
+using UnityEngine.XR.OpenXR;
 
 // Chooses how the viewer runs and sets the scene up for that mode. It runs once at startup, before
 // every other script (execution order -1000), so VMDCameraController finds the right Camera.main.
@@ -31,10 +32,14 @@ using UnityEngine.XR.Management;
 //   which XROrigin's own Start could not do before XR existed (wrong eye height otherwise).
 //
 // Placement: when the molecule first appears it is turned toward the user, scaled and placed in
-// front of the head (LateUpdate, FitMolecule). In Headset mode the first placement waits until the
-// head pose has been steady for a second, so a headset that is still being picked up or put on
-// does not fix the view. Recenter and ToggleImmersive place it again, and so does a change of the
-// runtime's tracking origin (for example a system recenter with the headset's menu button).
+// front of the head (LateUpdate, FitMolecule), and the status panel is placed in view with it. In
+// Headset mode the first placement waits until the headset is in use (the OpenXR session is focused
+// and the runtime reports a user present) and then until the head pose has been steady for a
+// second, so a headset that is still lying on a desk, being picked up or being put on does not fix
+// the view. (SteamVR reports a tracked, perfectly steady head while the headset lies on a desk;
+// placing from that pose put the molecule at desk height, facing away; see docs/VR_ISSUES.md,
+// issue 8.) Recenter and ToggleImmersive place it again, and so does a change of the runtime's
+// tracking origin (for example a system recenter with the headset's menu button).
 //
 // Viewpoint diagnostics: every placement and the tracking origin setup are logged with the prefix
 // "[VMDView]" (head, origin and target poses, requested and current tracking origin mode), so a
@@ -53,6 +58,9 @@ public class VMDXRBootstrap : MonoBehaviour
     // Set when XR failed to start, so the reloaded scene stays in Desktop mode.
     private static bool forceDesktop;
 
+    // The molecule is at immersive size (ToggleImmersive); read by VMDRayHighlight's log.
+    public static bool Immersive { get; private set; }
+
     // The project enters Play mode without a domain reload, so static fields keep their values
     // from the previous Play session. Reset them, or one failed XR start would keep every later
     // session in Desktop mode until scripts are recompiled.
@@ -61,6 +69,7 @@ public class VMDXRBootstrap : MonoBehaviour
     {
         forceDesktop = false;
         ActiveMode = Mode.Desktop;
+        Immersive = false;
     }
     // XR starts this many frames, plus this many seconds, after Awake (see the header).
     private const int StartupFramesBeforeXR = 3;
@@ -75,11 +84,14 @@ public class VMDXRBootstrap : MonoBehaviour
     [SerializeField] private bool simulateInEditor = true;
     // Found in the scene when not assigned.
     [SerializeField] private MoleculeRenderer molecule;
-    // Where the fitted molecule's center goes: x to the right, y above the floor, z ahead, measured
-    // from the floor point below the head along the head's heading (ViewTarget), not from the
-    // XR Origin's own axes.
-    [Tooltip("Molecule center relative to the XR Origin, in meters.")]
-    [SerializeField] private Vector3 moleculeOffset = new Vector3(0f, 1.3f, 1.5f);
+    // Where the fitted molecule's center goes, measured from the eyes along the head's heading
+    // (ViewTarget): x to the right, y up from eye height, z ahead. Relative to the eyes, not the
+    // floor, so it lands at the same place in view whether the user sits or stands, and a runtime
+    // that reports the floor height differently cannot move it. (Until 2026-11-14 y was 1.3 m above
+    // the floor, a value chosen while the eyes were placed about 1.4 m too high; see
+    // docs/VR_ISSUES.md, issue 7.)
+    [Tooltip("Molecule center relative to the eyes, along the head's heading: x right, y up, z ahead, in meters.")]
+    [SerializeField] private Vector3 moleculeOffsetFromEye = new Vector3(0f, -0.15f, 1.5f);
     [Tooltip("Radius of the molecule's bounding sphere after fitting, in meters.")]
     // 0.4 m looked like a desk model in the Valve Index; 0.8 m is about person-sized.
     [SerializeField, Min(0.01f)] private float moleculeRadius = 0.8f;
@@ -99,10 +111,12 @@ public class VMDXRBootstrap : MonoBehaviour
     private bool startedXR, fitted, oriented, immersive;
     // Frame at which to fit again, -1 when no fit is pending.
     private int refitFrame = -1;
-    // The first fit waits for a steady head pose (at most this long), so it lands where the user is
-    // looking; headWaitUntil is the deadline.
+    // Headset mode: once the headset is in use (HeadsetInUse), the first fit waits for a steady head
+    // pose (at most this long), so it lands where the user is looking; headWaitUntil is the deadline,
+    // -1 while the headset is not in use. headsetInUse is the last state logged.
     private const float HeadPoseWaitSeconds = 10f;
-    private float headWaitUntil;
+    private float headWaitUntil = -1f;
+    private bool? headsetInUse;
     // Steady: the head moved less than HeadSettleMeters and turned less than HeadSettleDegrees
     // during the last HeadSettleSeconds. settleSince is -1 while the head is untracked.
     private const float HeadSettleSeconds = 1f;
@@ -149,7 +163,7 @@ public class VMDXRBootstrap : MonoBehaviour
             gameObject.AddComponent<VMDVRController>();
         if (xr && GetComponent<VMDRayHighlight>() == null)
             gameObject.AddComponent<VMDRayHighlight>();
-        // Only real controllers can be Index controllers; the simulator needs no squeeze grab.
+        // Only real controllers can be Index controllers; the simulator needs no trigger grab.
         if (ActiveMode == Mode.Headset && GetComponent<VMDIndexGrip>() == null)
             gameObject.AddComponent<VMDIndexGrip>();
         if (xr)
@@ -172,7 +186,6 @@ public class VMDXRBootstrap : MonoBehaviour
         yield return new WaitForSecondsRealtime(StartupSecondsBeforeXR);
         if (TryStartXR())
         {
-            headWaitUntil = Time.unscaledTime + HeadPoseWaitSeconds;
             Debug.Log("[VMDXRBootstrap] XR started.", this);
             HookTrackingOrigin();
             yield return ApplyTrackingOrigin();
@@ -245,8 +258,8 @@ public class VMDXRBootstrap : MonoBehaviour
                 placementReason = "tracking origin changed";
             }
         }
-        // Headset: wait until XR has started and the head pose is steady, or the wait has run out.
-        if (!oriented && ActiveMode == Mode.Headset && (!startedXR || !originReady || (!HeadSettled() && Time.unscaledTime < headWaitUntil)))
+        // Headset: wait until XR has started, the headset is in use and the head pose is steady.
+        if (!oriented && ActiveMode == Mode.Headset && !ReadyForFirstPlacement())
             return;
         // Nothing is drawn yet.
         if (!VMDCameraController.TryGetMoleculeBounds(molecule, renderers, out Bounds bounds))
@@ -263,9 +276,45 @@ public class VMDXRBootstrap : MonoBehaviour
         if (!fitted || (refitFrame >= 0 && Time.frameCount >= refitFrame))
         {
             refitFrame = -1;
+            bool first = !fitted;
             FitMolecule(bounds);
+            // The panel placed itself as soon as the head was tracked, possibly from a headset
+            // lying on a desk; put it in view together with the first placement.
+            if (first && statusPanel != null)
+                statusPanel.PlaceInView();
         }
     }
+
+    // Headset mode, before the first placement: whether XR runs with its tracking origin applied,
+    // the headset is in use and the head pose has been steady for HeadSettleSeconds, or has been in
+    // use for HeadPoseWaitSeconds. Called every frame until the first placement, so HeadSettled
+    // keeps following the head.
+    private bool ReadyForFirstPlacement()
+    {
+        if (!startedXR || !originReady)
+            return false;
+        bool inUse = HeadsetInUse();
+        if (headsetInUse != inUse)
+        {
+            headsetInUse = inUse;
+            Debug.Log($"[VMDView] Headset {(inUse ? "in use; placing once the head is steady" : "not in use yet; waiting before placing")}: " +
+                      $"session focused {OpenXRUtility.IsSessionFocused}, user present {OpenXRUtility.IsUserPresent}; t={Time.unscaledTime:F1} s.", this);
+        }
+        if (!inUse)
+        {
+            headWaitUntil = -1f;
+            settleSince = -1f;
+            return false;
+        }
+        if (headWaitUntil < 0f)
+            headWaitUntil = Time.unscaledTime + HeadPoseWaitSeconds;
+        return HeadSettled() || Time.unscaledTime >= headWaitUntil;
+    }
+
+    // Whether someone is looking through the headset: the OpenXR session is focused (the runtime
+    // shows this app's frames and sends it input, not its own home or dashboard) and the runtime
+    // reports a user present. A runtime without presence sensing always reports a user present.
+    private static bool HeadsetInUse() => OpenXRUtility.IsSessionFocused && OpenXRUtility.IsUserPresent;
 
     // Undo the user's grabs: restore the initial orientation facing the user, then fit size and
     // position again in front of where the user is looking, and put the status panel back in
@@ -291,6 +340,7 @@ public class VMDXRBootstrap : MonoBehaviour
         if (ActiveMode == Mode.Desktop || molecule == null || xrOrigin == null)
             return;
         immersive = !immersive;
+        Immersive = immersive;
         Debug.Log($"[VMDXRBootstrap] {(immersive ? "Immersive" : "In-front")} size.", this);
         Recenter();
         placementReason = immersive ? "immersive size" : "in-front size";
@@ -437,18 +487,16 @@ public class VMDXRBootstrap : MonoBehaviour
         return eye + ViewRotation() * (Vector3.forward * (targetRadius * immersiveCenterAhead));
     }
 
-    // moleculeOffset measured from the floor point below the head, along the head's heading.
+    // moleculeOffsetFromEye measured from the eyes: up along the origin's up axis, right and ahead
+    // along the head's heading (level, so looking down does not push the molecule into the floor).
     private Vector3 ViewTarget()
     {
         Transform origin = xrOrigin.transform;
         Camera head = Camera.main;
-        Vector3 floor = origin.position;
-        if (head != null)
-        {
-            Vector3 headPosition = head.transform.position;
-            floor = headPosition - origin.up * Vector3.Dot(headPosition - origin.position, origin.up);
-        }
-        return floor + ViewRotation() * Vector3.Scale(moleculeOffset, origin.lossyScale);
+        Vector3 eye = head != null ? head.transform.position : origin.position;
+        Vector3 offset = Vector3.Scale(moleculeOffsetFromEye, origin.lossyScale);
+        Vector3 level = new Vector3(offset.x, 0f, offset.z);
+        return eye + origin.up * offset.y + ViewRotation() * level;
     }
 
     // Scale and place the molecule now, at the in-front or the immersive size, whichever is
@@ -487,6 +535,7 @@ public class VMDXRBootstrap : MonoBehaviour
     {
         UnhookTrackingOrigin();
         ActiveMode = Mode.Desktop;
+        Immersive = false;
         if (!startedXR)
             return;
         XRManagerSettings manager = XRGeneralSettings.Instance != null ? XRGeneralSettings.Instance.Manager : null;

@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
-// Shared playback controller. Play, Pause, Step and Seek from every input end up here: the
+// Shared playback controller. Play, Pause, Step, Seek and Speed from every input end up here: the
 // OnGUI panel below, VMDKeyboardController, VMDVRController and the XR VMDStatusPanel. It
 // also provides the two-line status text and decides which display route draws the molecule.
 //
@@ -30,8 +30,13 @@ public class TrajectoryController : MonoBehaviour
 {
     // When not assigned, OnEnable looks on this object and then anywhere in the scene.
     [SerializeField] private VMDClient client;
-    // Seconds between frames during playback, on both routes.
+    // Seconds between frames during playback at speed 1x, on both routes.
     [SerializeField, Min(0.01f)] private float stepInterval = 0.1f;
+    // Playback speeds the Speed button steps through, starting at 1x. Each divides stepInterval,
+    // so 0.5x shows every frame for twice as long; no frames are skipped or interpolated.
+    private static readonly float[] Speeds = { 1f, 0.5f, 0.25f, 2f };
+    // Index into Speeds of the current speed.
+    private int speedIndex;
     // Largest number of frames kept in the rolling coordinate buffer; Open may lower it (capacity).
     [SerializeField, Range(2, 64)] private int prefetchFrames = 24;
     // Which route draws the molecule and handles playback:
@@ -101,6 +106,11 @@ public class TrajectoryController : MonoBehaviour
     // or the coordinate route owns the display but does not show targetFrame yet.
     public bool IsWaitingForCoordinates => waitingForCoordinates || (OwnsDisplay && (scene == null || !scene.HasFrame || targetFrame != currentFrame));
     public bool IsPlaying => isPlaying;
+    // Current playback speed as a factor of 1x, and as a label such as "0.5x".
+    public float Speed => Speeds[speedIndex];
+    public string SpeedText => Speed.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "x";
+    // Seconds between frames at the current speed.
+    private float StepSeconds => stepInterval / Speed;
     public bool IsConnected => subscribedClient != null && subscribedClient.IsConnected;
     // Frame the coordinate route displays, -1 before the first. Not updated on the mesh route.
     public int CurrentFrame => currentFrame;
@@ -221,7 +231,7 @@ public class TrajectoryController : MonoBehaviour
 
     // Coordinate route, every Update:
     // 1. Display targetFrame as soon as it is in the buffer.
-    // 2. While playing, advance targetFrame by one frame per stepInterval; pause at the last frame.
+    // 2. While playing, advance targetFrame by one frame per StepSeconds; pause at the last frame.
     // 3. Start at most one request, in this order: a TRAJ_SYNC that is due, a TRAJ_READ
     //    for the first frames missing from the buffer window, or the periodic TRAJ_CHECK.
     private void UpdateCoordinates()
@@ -240,7 +250,7 @@ public class TrajectoryController : MonoBehaviour
                 if (first) representationController?.FitView();
                 // While paused, sync VMD to this frame once it has settled (see SyncDelay).
                 if (!isPlaying) { syncFrame = currentFrame; syncNotBefore = Time.unscaledTime + SyncDelay; }
-                nextStepTime = Time.unscaledTime + stepInterval;
+                nextStepTime = Time.unscaledTime + StepSeconds;
             }
             catch (Exception error) { Fail(error); return; }
         }
@@ -349,6 +359,15 @@ public class TrajectoryController : MonoBehaviour
         if (route == Route.Coordinates && currentFrame == metadata.frameCount-1) targetFrame = 0;
         isPlaying = true;
         nextStepTime = Time.unscaledTime;
+    }
+
+    // Switch to the next playback speed (1x, 0.5x, 0.25x, 2x, then 1x again). It takes effect at
+    // once while playing: a pending step is never put off longer than the new interval.
+    public void CycleSpeed()
+    {
+        speedIndex = (speedIndex + 1) % Speeds.Length;
+        nextStepTime = Mathf.Min(nextStepTime, Time.unscaledTime + StepSeconds);
+        Debug.Log($"[TrajectoryController] Playback speed {SpeedText} ({1f / StepSeconds:0.#} frames per second).", this);
     }
 
     // Stop playback. The coordinate route stays on the displayed frame, giving up a frame it
@@ -485,7 +504,7 @@ public class TrajectoryController : MonoBehaviour
         scene = null;
     }
 
-    // Playback on the mesh route (Existing and Explicit): one STEP 1 per stepInterval,
+    // Playback on the mesh route (Existing and Explicit): one STEP 1 per StepSeconds,
     // and the next one only after VMD's coordinates for the previous step have
     // arrived. A reply that takes longer than 10 s pauses playback. Stepping starts
     // only once RepresentationController allows mesh playback (TryStartMeshPlayback).
@@ -506,7 +525,7 @@ public class TrajectoryController : MonoBehaviour
         // SendCommand returned false: the command was not sent, so stop playing.
         if (!waitingForCoordinates) { isPlaying = false; SetRepresentationPlayback(false); return; }
         requestTime = Time.unscaledTime;
-        nextStepTime = requestTime + stepInterval;
+        nextStepTime = requestTime + StepSeconds;
     }
 
     // A coordinate frame arrived from VMD; on the mesh route this answers a STEP.
@@ -567,7 +586,7 @@ public class TrajectoryController : MonoBehaviour
         return string.Join(", ", reps.ConvertAll(rep => rep.Key >= 0 ? "rep" + rep.Key + " " + rep.Value : rep.Value));
     }
 
-    // One format for every route: "[route] state  frame / last" and a detail
+    // One format for every route: "[route] state  frame / last  speed Nx" and a detail
     // line. The route labels are Offline, Unity live (Coordinates), VMD mesh
     // (Existing), Static view (Explicit), Error (Failed) and Preparing (Pending).
     private string BuildStatus()
@@ -606,7 +625,7 @@ public class TrajectoryController : MonoBehaviour
                 detail = note;
                 break;
         }
-        return "[" + label + "] " + state + "  " + frame + "\n" + detail;
+        return "[" + label + "] " + state + "  " + frame + "  speed " + SpeedText + "\n" + detail;
     }
 
     // "frame / last frame", or "- / -" when either is unknown.
@@ -620,7 +639,7 @@ public class TrajectoryController : MonoBehaviour
     // reads it from the mouse, lies on the panel. The camera controller then ignores the mouse.
     public static bool CapturesPointer(Vector2 screenPoint) => Controls.Contains(new Vector2(screenPoint.x, Screen.height-screenPoint.y));
 
-    // Desktop panel: Play/Pause, Previous and Next buttons above the two status lines. The
+    // Desktop panel: Play/Pause, Previous, Next and Speed buttons above the two status lines. The
     // buttons are disabled while VMD is disconnected. VMDStatusPanel copies this layout for XR.
     private void OnGUI()
     {
@@ -630,6 +649,7 @@ public class TrajectoryController : MonoBehaviour
         if (GUI.Button(new Rect(20,20,75,28), isPlaying ? "Pause" : "Play")) Toggle();
         if (GUI.Button(new Rect(103,20,90,28), "Previous")) PreviousFrame();
         if (GUI.Button(new Rect(201,20,90,28), "Next")) NextFrame();
+        if (GUI.Button(new Rect(299,20,100,28), "Speed " + SpeedText)) CycleSpeed();
         GUI.enabled = previous;
         GUI.Label(new Rect(20,55,460,50), Status);
     }
