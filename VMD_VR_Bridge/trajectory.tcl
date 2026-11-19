@@ -42,14 +42,18 @@ proc ::vrbridge::trajectory_signature {} {
     set result [list [molinfo top]]
     foreach m [molinfo list] {
         lappend result $m [molinfo $m get {drawn numatoms numframes numreps}]
+        set cartoon 0
         for {set r 0} {$r < [molinfo $m get numreps]} {incr r} {
             lappend result [mol showrep $m $r] [molinfo $m get [list [list rep $r] [list selection $r] [list color $r] [list material $r]]]
             lappend result [mol selupdate $r $m] [mol colupdate $r $m]
             lappend result [mol showperiodic $m $r] [mol smoothrep $m $r]
-            if {[mol showrep $m $r] && [lindex [lindex [molinfo $m get [list [list rep $r]]] 0] 0] eq "NewCartoon"} {
-                lappend result [::vrbridge::cartoon_structure_signature $m]
-                foreach name [colorinfo category Structure] { lappend result $name [color Structure $name] }
-            }
+            if {[mol showrep $m $r] && [lindex [lindex [molinfo $m get [list [list rep $r]]] 0] 0] eq "NewCartoon"} { set cartoon 1 }
+        }
+        # The structure codes are per molecule, so they are added once however many NewCartoon
+        # reps it has (they were added per rep, which made every check slow with many reps).
+        if {$cartoon} {
+            lappend result [::vrbridge::cartoon_structure_signature $m]
+            foreach name [colorinfo category Structure] { lappend result $name [color Structure $name] }
         }
     }
     # Color edits should also invalidate a running snapshot.
@@ -117,6 +121,9 @@ proc ::vrbridge::trajectory_metadata {owner} {
     set reps {}
     set cartoons {}
     set surfaces {}
+    # NewCartoon reps share the molecule's backbone data; compute it once for this snapshot.
+    ::vrbridge::cartoon_cache_begin
+    set code [catch {
     for {set r 0} {$r < [molinfo $m get numreps]} {incr r} {
         if {![mol showrep $m $r]} { continue }
         lassign [molinfo $m get [list [list rep $r] [list selection $r] [list color $r] [list material $r]]] style selection coloring material
@@ -168,6 +175,9 @@ proc ::vrbridge::trajectory_metadata {owner} {
         $sel delete
         if {$code} { return -options $options $message }
     }
+    } loopMessage loopOptions]
+    ::vrbridge::cartoon_cache_end
+    if {$code} { return -options $loopOptions $loopMessage }
     if {![llength $reps] && ![llength $cartoons] && ![llength $surfaces]} { error "No visible coordinate representations" }
     # Every snapshot gets a new token; TRAJ_READ, TRAJ_CHECK and TRAJ_SYNC must present it.
     set token [clock clicks]

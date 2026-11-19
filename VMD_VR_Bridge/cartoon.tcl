@@ -72,30 +72,29 @@ proc ::vrbridge::cartoon_chain_json {indices carbons oxygens structures colors} 
         [join $indices ,] [join $carbons ,] [join $oxygens ,] [join $structures ,] [join $colors ,]]
 }
 
-# Return the JSON object for one NewCartoon rep: id (the rep index), radius, resolution,
-# aspect and spline (the four NewCartoon style parameters) and chains.
-# m: the molecule ID. selection, coloring, style: the rep's VMD strings. repIndex: its index.
-# A chain is a run of consecutive backbone residues that are all selected and share the same
-# chain, segname and, for residues VMD flags as protein, protein fragment (pfrag).
-# Raises an error when the selection contains nucleic acid or uses an unsupported coloring.
-# Called by trajectory_metadata in trajectory.tcl.
-proc ::vrbridge::cartoon_metadata {m selection coloring style repIndex} {
-    set selected [atomselect $m $selection]
-    set backbone ""
+# The per-molecule data every NewCartoon rep of molecule m reads, independent of the rep: a dict
+# with "first", the row of the first backbone atom of each residue in backbone order (the row
+# layout of cartoon_color, with the structure code at position 6), "ordinal", that row's position
+# in "first" by atom index, and "planes", the first C and O atom index of each protein residue.
+# trajectory_metadata calls cartoon_cache_begin before its reps and cartoon_cache_end after them,
+# so this is computed once per TRAJ_OPEN, not once per rep (with 76 NewCartoon reps on a
+# 126800-bead molecule, TRAJ_OPEN took about 115 s). Outside that, it is computed on every call.
+proc ::vrbridge::cartoon_molecule_data {m} {
+    variable cartoon_cache
+    if {[info exists cartoon_cache] && [dict exists $cartoon_cache $m]} { return [dict get $cartoon_cache $m] }
+    set backbone [atomselect $m [::vrbridge::cartoon_backbone]]
     set planes ""
-    set nucleic ""
     set code [catch {
-        # Nucleic cartoons need their own base geometry; never silently omit them.
-        set nucleic [atomselect $m "($selection) and nucleic"]
-        if {[$nucleic num] > 0} { error "Nucleic NewCartoon uses the existing renderer" }
-        set chosen [dict create]
-        foreach index [$selected get index] { dict set chosen $index 1 }
-        set backbone [atomselect $m [::vrbridge::cartoon_backbone]]
-        # One row per backbone atom of the whole molecule, with its structure code inserted
-        # at position 6 (the layout that cartoon_color documents).
-        set rows {}
+        set first {}
+        set ordinal [dict create]
+        set seen [dict create]
         foreach row [$backbone get {index residue chain segname pfrag protein name element resname}] structure [::vrbridge::cartoon_structures $backbone] {
-            lappend rows [linsert $row 6 $structure]
+            set residue [lindex $row 1]
+            # Only the first backbone atom of a residue is used.
+            if {[dict exists $seen $residue]} { continue }
+            dict set seen $residue 1
+            dict set ordinal [lindex $row 0] [llength $first]
+            lappend first [linsert $row 6 $structure]
         }
         # The first C and the first O atom of each residue. Unity takes the ribbon's
         # orientation from the C-to-O direction; a residue without them gets -1.
@@ -105,16 +104,59 @@ proc ::vrbridge::cartoon_metadata {m selection coloring style repIndex} {
             lassign $row index residue name
             if {![dict exists $planeAtoms $residue $name]} { dict set planeAtoms $residue $name $index }
         }
+        set data [dict create first $first ordinal $ordinal planes $planeAtoms]
+    } result options]
+    $backbone delete
+    if {$planes ne ""} { $planes delete }
+    if {$code} { return -options $options $result }
+    if {[info exists cartoon_cache]} { dict set cartoon_cache $m $data }
+    return $data
+}
+
+# Start and end caching cartoon_molecule_data for one TRAJ_OPEN (see there).
+proc ::vrbridge::cartoon_cache_begin {} {
+    variable cartoon_cache
+    set cartoon_cache [dict create]
+}
+proc ::vrbridge::cartoon_cache_end {} {
+    variable cartoon_cache
+    unset -nocomplain cartoon_cache
+}
+
+# Return the JSON object for one NewCartoon rep: id (the rep index), radius, resolution,
+# aspect and spline (the four NewCartoon style parameters) and chains.
+# m: the molecule ID. selection, coloring, style: the rep's VMD strings. repIndex: its index.
+# A chain is a run of consecutive backbone residues that are all selected and share the same
+# chain, segname and, for residues VMD flags as protein, protein fragment (pfrag).
+# Raises an error when the selection contains nucleic acid or uses an unsupported coloring.
+# Called by trajectory_metadata in trajectory.tcl.
+proc ::vrbridge::cartoon_metadata {m selection coloring style repIndex} {
+    set selected [atomselect $m $selection]
+    set nucleic ""
+    set code [catch {
+        # Nucleic cartoons need their own base geometry; never silently omit them.
+        set nucleic [atomselect $m "($selection) and nucleic"]
+        if {[$nucleic num] > 0} { error "Nucleic NewCartoon uses the existing renderer" }
+        set data [::vrbridge::cartoon_molecule_data $m]
+        set first [dict get $data first]
+        set ordinal [dict get $data ordinal]
+        set planeAtoms [dict get $data planes]
+        # The residues this rep draws: those whose first backbone atom is selected, in backbone
+        # order. Positions that are not consecutive in "first" have a residue between them that
+        # this rep hides.
+        set positions {}
+        foreach index [$selected get index] {
+            if {[dict exists $ordinal $index]} { lappend positions [dict get $ordinal $index] }
+        }
         set chains {}; set indices {}; set carbons {}; set oxygens {}; set structures {}; set colors {}
-        set seen [dict create]; set lastKey ""; set gap 1
-        foreach row $rows {
+        set lastKey ""; set previous -2
+        foreach position [lsort -integer -unique $positions] {
+            set row [lindex $first $position]
             lassign $row index residue chain segment fragment protein structure
-            # Only the first backbone atom of a residue is used.
-            if {[dict exists $seen $residue]} { continue }
-            dict set seen $residue 1
             # Never connect across a hidden residue, chain/segment boundary or protein fragment.
             set key [list $chain $segment [expr {$protein ? $fragment : -1}]]
-            if {![dict exists $chosen $index]} { set gap 1; continue }
+            set gap [expr {$position != $previous + 1}]
+            set previous $position
             if {($gap || $key ne $lastKey) && [llength $indices] > 0} {
                 lappend chains [::vrbridge::cartoon_chain_json $indices $carbons $oxygens $structures $colors]
                 set indices {}; set carbons {}; set oxygens {}; set structures {}; set colors {}
@@ -131,7 +173,7 @@ proc ::vrbridge::cartoon_metadata {m selection coloring style repIndex} {
             if {$structure in {E B}} { set kind 2 }
             lappend structures $kind
             lappend colors {*}[::vrbridge::cartoon_color $coloring $row]
-            set gap 0; set lastKey $key
+            set lastKey $key
         }
         if {[llength $indices]} { lappend chains [::vrbridge::cartoon_chain_json $indices $carbons $oxygens $structures $colors] }
         set radius [lindex $style 1]
@@ -148,7 +190,7 @@ proc ::vrbridge::cartoon_metadata {m selection coloring style repIndex} {
         set result [format {{"id":%d,"radius":%s,"resolution":%d,"aspect":%s,"spline":%d,"chains":[%s]}} \
             $repIndex $radius $resolution $aspect $spline [join $chains ,]]
     } result options]
-    foreach sel [list $selected $backbone $planes $nucleic] { if {$sel ne ""} { $sel delete } }
+    foreach sel [list $selected $nucleic] { if {$sel ne ""} { $sel delete } }
     if {$code} { return -options $options $result }
     return $result
 }
