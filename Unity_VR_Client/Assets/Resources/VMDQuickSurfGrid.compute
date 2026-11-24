@@ -102,13 +102,15 @@ float3 Gradient(int3 c)
                   Density(c + int3(0,0,1)) - Density(c - int3(0,0,1)));
 }
 
-// Density-weighted mean color of the atoms at a grid point; white where there is no density.
-float3 AtomColor(int3 c)
+// Density-weighted mean color of the atoms at a grid point in rgb, and in w whether the point
+// has any density (1) or not (0, rgb white). Edge does not blend toward a point without density.
+float4 AtomColor(int3 c)
 {
     uint cell = Cell(c);
     uint weight = _Density[cell];
-    if (weight == 0) return float3(1,1,1);
-    return float3(_ColorSum[cell*3], _ColorSum[cell*3+1], _ColorSum[cell*3+2]) / weight;
+    float4 color = float4(1,1,1,0);
+    if (weight != 0) color = float4(float3(_ColorSum[cell*3], _ColorSum[cell*3+1], _ColorSum[cell*3+2]) / weight, 1);
+    return color;
 }
 
 // RGBA8 in one uint: red in the lowest byte, alpha 255.
@@ -123,7 +125,7 @@ uint Pack(float3 color)
 static int3 baseCell;
 static float value[8];
 static float3 gradient[8];
-static float3 tint[8];
+static float4 tint[8];
 
 // Vertex where the isosurface crosses the cube edge between corners i and
 // j. Position, gradient and color are interpolated linearly along the edge.
@@ -135,7 +137,13 @@ SurfaceVertex Edge(uint i, uint j)
     float3 g = lerp(gradient[i], gradient[j], t);
     // Density decreases outward, so the outward normal is the negative gradient.
     v.normal = dot(g, g) > 1e-20 ? -normalize(g) : float3(0,0,0);
-    v.color = Pack(lerp(tint[i], tint[j], t));
+    // The outer corner of an edge can lie beyond every atom's Gaussian cutoff and have no density,
+    // hence no color. Blending toward the white placeholder whitened dense surfaces (all-atom
+    // proteins push the isosurface close to the cutoff), so such a corner takes the color of the
+    // other corner instead. Edges whose corners both have density are colored as before.
+    float3 ci = tint[i].w > 0 ? tint[i].rgb : tint[j].rgb;
+    float3 cj = tint[j].w > 0 ? tint[j].rgb : tint[i].rgb;
+    v.color = Pack(lerp(ci, cj, t));
     return v;
 }
 
