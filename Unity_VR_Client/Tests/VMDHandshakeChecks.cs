@@ -1,4 +1,4 @@
-// Editor check of the client side of the HELLO protocol handshake (README, "Protocol
+// Editor check of the client side of the HELLO protocol handshake (docs/DEVELOPER.md, "Protocol
 // handshake"): how VMDClient.TryReadHandshake treats each possible reply line. It needs no VMD,
 // no TCP connection, no fixtures and no Play mode; the method is private and is called through
 // reflection. The bridge's side of the handshake is covered by VMD_VR_Bridge/_test_bridge.tcl.

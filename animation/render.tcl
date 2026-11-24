@@ -1,9 +1,10 @@
 #This is a rendering script
 #usage: 
 #Step 1: Provide the path to the PDB and XTC files with frames to be imported in the script
-    #example:
-        #mol new mutl_open_CA.pdb
-        #mol addfile output_NVT_timecorrected.xtc first 12800 last 16069
+    #The script loads the bundled MutLa sample (see "Load file" below). To use your own data,
+    #replace those two lines, for example (example file names and frame range):
+        #mol new your_structure.pdb
+        #mol addfile your_trajectory.xtc first 12800 last 16069 waitfor all
 #Step 2: Change the parameters in the script to customize the rendering
 #Step 3: source animation/render.tcl (from the repository root; any working directory works)
 

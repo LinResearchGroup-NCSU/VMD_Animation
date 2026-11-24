@@ -19,7 +19,7 @@
 #   static_scene.tcl  GET_SCENE_STATE, EXPORT_SCENE, SET_REPRESENTATION, RELEASE_SCENE
 #   trajectory.tcl    TRAJ_OPEN, TRAJ_READ, TRAJ_CHECK, TRAJ_SYNC, TRAJ_STYLE
 #                     (it sources cartoon.tcl and quicksurf.tcl)
-# README.md, section "VMD bridge", has the command table.
+# docs/DEVELOPER.md, section "Commands", has the command table.
 #
 # Port: ::vrbridge::start <port> listens on the given port. Without a port it uses the
 # VMD_VR_PORT environment variable, or 45454. In VMD: set env(VMD_VR_PORT) 45455 before
@@ -51,14 +51,15 @@ namespace eval vrbridge {
     # HIGHLIGHT. ::vrbridge::define_selection adds entries.
     variable selections
 
-    # These labels map to MutLalpha domains from the existing VMD project.
-    # N_DOMAIN, C_DOMAIN and LINKER use hard-coded resid ranges for this dataset;
-    # they do not automatically identify domains in other proteins or numbering schemes.
-    # resid is the residue identifier, not the atom index. These expressions have no
-    # chain/segname filter, so repeated residue IDs across chains can select extra atoms.
-    # Before using HIGHLIGHT with another structure, verify its domain boundaries,
-    # residue numbering and chain/segment IDs, then adapt this mapping as needed.
-    # Unadapted ranges may select incorrect atoms or nothing; ALL clears the highlight.
+    # EXAMPLE values: N_DOMAIN, C_DOMAIN and LINKER are the MutLalpha domains of the bundled
+    # sample, as hard-coded resid ranges for this dataset; they do not identify domains in
+    # other proteins or numbering schemes. resid is the residue identifier, not the atom
+    # index. These expressions have no chain/segname filter, so repeated residue IDs across
+    # chains can select extra atoms. Unadapted ranges may select incorrect atoms or nothing.
+    # For your own structure, replace them with your own selections: per session with
+    # ::vrbridge::define_selection after sourcing start_vr.tcl (no Unity rebuild needed), or
+    # permanently by editing the ranges below. See "Changing what is highlighted" in README.md.
+    # ALL clears the HIGHLIGHT representation.
     array set selections {
         N_DOMAIN {resid 1 to 315 or resid 533 to 848}
         C_DOMAIN {resid 331 to 508 or resid 863 to 1040}

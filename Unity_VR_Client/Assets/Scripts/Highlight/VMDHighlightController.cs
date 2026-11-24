@@ -35,6 +35,9 @@ public class VMDHighlightController : MonoBehaviour
     // Both are found in the scene when left empty (Awake).
     [SerializeField] private VMDClient client;
     [SerializeField] private MoleculeRenderer molecule;
+    // The defaults are the bridge's example names for the MutLalpha sample. Players built with this
+    // list highlight whatever VMD defines under these names, so redefining them in VMD is enough
+    // for another molecule; see "Changing what is highlighted" in README.md.
     [Tooltip("Bridge selection names (see ::vrbridge::define_selection) or VMD selection text, in Cycle order.")]
     [SerializeField] private string[] selections = { "N_DOMAIN", "C_DOMAIN", "LINKER" };
     [Tooltip("How strongly atoms outside the selection are muted: 0 unchanged, 1 dark gray.")]

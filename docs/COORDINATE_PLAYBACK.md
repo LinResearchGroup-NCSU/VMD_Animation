@@ -22,7 +22,7 @@ Frames are zero based. At the last frame playback pauses; Play restarts at frame
 
 ## Implementation and scope
 
-- The desktop controls, XR controllers, and XR status panel use the shared `TrajectoryController.Play/Pause/Toggle/NextFrame/PreviousFrame/Step/Seek/CycleSpeed` API. See [XR controls](../README.md#xr-controls) for the current bindings.
+- The desktop controls, XR controllers, and XR status panel use the shared `TrajectoryController.Play/Pause/Toggle/NextFrame/PreviousFrame/Step/Seek/CycleSpeed` API. See [Controls](../README.md#controls) for the current bindings.
 - VMD sends selected atom indices, radii, colors, fixed bonds, and the initial molecule transform once per snapshot. Coordinates are read with `atomselect ... frame`, without changing VMD's displayed frame or exporting geometry. Pause/seek synchronize the displayed frame back to VMD.
 - All live renderers share `Resources/VMDLighting.cginc`, the same lighting a VMD OBJ export gets in `VMDStaticGeometry.shader`. VMD's Wavefront exporter ignores the material and writes `Ka 0`, `Kd` = 0.65 × color, `Ks` = 0.5 × color and `Ns 40` for every rep, so a scene looks the same on the live and existing routes, and VMD material edits (other than transparency, which selects the existing route) do not change Unity's lighting on either route.
 - Unity reuses a sphere mesh and cylinder mesh with GPU instancing. CPK bonds are two half-cylinders colored by their endpoints. Mesh detail is fixed at a modest resolution for this first version; VMD's own on-screen lighting is not reproduced pixel for pixel.

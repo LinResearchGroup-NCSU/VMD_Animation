@@ -43,6 +43,22 @@ DEVICE BASIS
    prints (see animation/split_large_reps.tcl). vr_unprepare restores the original reps.
    The panel status should then say [Unity live]; [VMD mesh] means a rep is still unsupported.
 
+4. Your own highlight parts (optional). The highlight parts N_DOMAIN, C_DOMAIN and LINKER are
+   EXAMPLES: residue ranges of the sample MutL-alpha molecule. With your own molecule they
+   select the wrong atoms or none, so replace them. After "source start_vr.tcl" and BEFORE
+   you double-click a Start_*.cmd file, run one line per part. The text in braces is an
+   example; replace it with a VMD selection for your molecule:
+
+     ::vrbridge::define_selection N_DOMAIN {chain A}
+     ::vrbridge::define_selection C_DOMAIN {chain B}
+     ::vrbridge::define_selection LINKER {resname ATP}
+
+   Keep the three names: the player only knows N_DOMAIN, C_DOMAIN and LINKER, but each may
+   hold any part. For fewer parts, give an unused name {none}.
+   "source start_vr.tcl" again resets the three names to the sample. To avoid retyping, save
+   the lines in your own .tcl file and source it right after start_vr.tcl each time.
+   Player already running? Close it and start it again; it reads the parts when it connects.
+
 [[index]]
 ------------------------------------------------------------------------------
 2A. VALVE INDEX + STEAMVR
@@ -95,7 +111,8 @@ DEVICE BASIS
    Back / forward 100 frames: left A / B on the Index, left X / Y on the Quest.
    Left stick click: put the molecule and the panel back in front of you.
    Right stick click: immersive size (stand inside the molecule); click again to go back.
-   Highlight: point the right controller at a domain; the rest turns gray. Point away to clear.
+   Highlight: point the right controller at a part (N_DOMAIN, C_DOMAIN or LINKER; section 1,
+     step 4); the rest turns gray. Point away to clear.
      The panel button "Pointing: On/Off" turns this on and off.
 
 ------------------------------------------------------------------------------

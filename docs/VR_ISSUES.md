@@ -17,6 +17,7 @@ Since the build/run/deploy cleanup, bundles are made with `vr deploy` (see [Buil
    - `Start_Index_SteamVR.cmd`, `Start_Quest_MetaLink.cmd`, `Start_Quest_SteamLink.cmd`, `Start_Desktop.cmd` and `run_player.cmd`: launchers
    - `start_vr.tcl` and `VMD_VR_Bridge/`: the VMD bridge
    - `animation/render.tcl`, `data/mutl_open_CA.pdb`, `data/Example_Trajectory.xtc`: scene setup and sample data
+   - `animation/vr_prepare.tcl`, `animation/split_large_reps.tcl`: helpers that adapt other scenes for VR
    - `INSTRUCTIONS.txt`: short instructions (source: `tools/bundle/INSTRUCTIONS.txt`)
    - `docs/VR_ISSUES.md`: this file
 2. Upload the zip to Google Drive. The lab PC needs no Unity, Git or repository checkout.
@@ -70,7 +71,7 @@ This procedure was tested on 2026-11-23 over a USB cable (Meta Horizon Link) on 
 | Start order | Start the player; it launches SteamVR | Start Link in the headset first, then the player |
 | Grab | Hold the trigger (`VMDIndexGrip`); let go to release | Hold the grip button; release it to let go |
 | Face buttons | A / B on both controllers | A / B on the right, X / Y on the left |
-| Controller profile | Valve Index Controller Profile | Meta Quest Touch Plus, or Oculus Touch as the fallback; both are enabled in the project |
+| Controller profile | Valve Index Controller Profile | Meta Quest Touch Plus Controller Profile, or Oculus Touch Controller Profile when the runtime lacks `XR_META_touch_controller_plus` (SteamVR does); all three profiles are enabled for the PC build target |
 
 The player is the same build for both headsets. It still has to run on the PC that runs VMD: a standalone app inside the Quest cannot reach the bridge on `127.0.0.1`.
 
@@ -105,7 +106,24 @@ The player is the same build for both headsets. It still has to run on the PC th
   - Cause: `VMDXRBootstrap` started XR in `Awake`, before the player had applied its startup window resolution. On this hybrid-GPU PC that resolution switch then failed with a fatal DX11 error (v1 build) or hung (v2 build). Command-line window options, `-force-d3d12`, the Windows "High performance" GPU preference and disabling the flip-model swapchain did not help.
   - Fix: Headset mode is still chosen in `Awake`, but XR now starts in `Start`, after three frames and a further 0.5 s. If XR does not start, the scene reloads in Desktop mode. See `Unity_VR_Client/Assets/Scripts/XR/VMDXRBootstrap.cs`.
 
-## Open issues
+## Issues
+
+Status at a glance; each issue below has the observations, logs and changes.
+
+| # | Issue | Status |
+| --- | --- | --- |
+| 1 | The molecule looks flat | Resolved: size and distance, not rendering. Immersive size checked on the Index 2026-11-18. |
+| 2 | Molecule small, off to the side, or stuck in the hand | Fixed; trigger grab and release checked on the Index 2026-11-18. |
+| 3 | Status panel small, tilted, stuck to the hand | Fixed; panel buttons and dragging checked on the Index 2026-11-18. |
+| 4 | VMD's own window looks different on the lab PC | Open: not compared yet. |
+| 5 | Background distracts from the molecule | Fixed in v6. |
+| 6 | Highlighting from inside VR | Fixed (ray highlighting); checked on the Index 2026-11-18, not on a Quest. |
+| 7 | Meta Quest viewpoint wrong (tracking origin) | Fix confirmed on the Index; a Quest `Player.log` still to check. |
+| 8 | Molecule placed before the headset is worn | Partly fixed; workaround: face forward and recenter after putting the headset on. |
+| 9 | Single Pass Instanced shows one eye only | Open: cause unknown; launchers use Multi-pass. |
+| 10 | Panel buttons do nothing at immersive size | Fix not yet run on a headset. |
+| 11 | Pressing B froze VMD with many NewCartoon reps | Fixed in the bridge. |
+| 12 | Quest picture more jagged on the RTX 4060 PC | Open: Link graphics settings to try. |
 
 ### 1. The molecule looks flat (resolved: a size and distance effect, not a rendering bug)
 - Observation: at its default size and distance the molecule looked flat; brought close, it is clearly 3D.
