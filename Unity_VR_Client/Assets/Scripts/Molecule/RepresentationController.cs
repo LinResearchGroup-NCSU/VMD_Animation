@@ -85,7 +85,16 @@ public class RepresentationController : MonoBehaviour
     // add a method here AND its default style in static_scene.tcl's
     // scene_set_representation switch; update both validation messages as well.
     // This list does NOT restrict automatic synchronization of VMD GUI changes.
-    private static readonly string[] SupportedMethods = { "VDW", "CPK", "QuickSurf", "NewCartoon" };
+    // "Original" is not a drawing method: the bridge restores each rep's style from before its
+    // first change by Unity, so the cycle can return to the scene's own (often mixed) look.
+    // The cycle order itself is VMDDrawingMethodCycle's.
+    private static readonly string[] SupportedMethods = { "VDW", "CPK", "QuickSurf", "NewCartoon", "Original" };
+    // Live route: the cycle built at the first press for molecule cycleMolecule (see
+    // VMDDrawingMethodCycle.Build), and the entry the last press asked for; the scene starts at
+    // Original. Another molecule starts a new cycle. Both are cleared when VMD disconnects.
+    private string[] cycle;
+    private int cycleMolecule = -1;
+    private string cycledMethod;
 
     // JSON payload of SCENEJSON, SCENEERROR and SCENESTATE lines; each line fills only some fields.
     // 'code' is "BUSY" when the bridge is still exporting or cooling down.
@@ -188,6 +197,8 @@ public class RepresentationController : MonoBehaviour
         {
             // The next connection starts again from the initial export.
             initialRequested = false;
+            cycledMethod = null;
+            cycle = null;
             ResetSynchronization();
             if (IsBusy) CancelOperation();
             return;
@@ -320,7 +331,7 @@ public class RepresentationController : MonoBehaviour
             value => string.Equals(value, method, StringComparison.OrdinalIgnoreCase));
         if (repIndex < 0 || canonical == null)
         {
-            Debug.LogWarning("[RepresentationController] Choose VDW, CPK, QuickSurf or NewCartoon and a valid rep index.", this);
+            Debug.LogWarning("[RepresentationController] Choose VDW, CPK, QuickSurf, NewCartoon or Original and a valid rep index.", this);
             return false;
         }
         if (trajectory != null && !IsBusy && client != null && client.IsConnected)
@@ -338,27 +349,44 @@ public class RepresentationController : MonoBehaviour
     public void NextRepresentation() => Cycle(1);
     public void PreviousRepresentation() => Cycle(-1);
 
-    // Step through SupportedMethods relative to the currently displayed method (wrapping around)
-    // and apply the result; starts from the first method if the current one is not in the list.
+    // Step through the drawing-method cycle (VMDDrawingMethodCycle) and apply the result.
     private void Cycle(int direction)
     {
-        int current = Array.IndexOf(SupportedMethods, currentDrawingMethod);
-        int next = current < 0 ? 0 : (current + direction + SupportedMethods.Length) % SupportedMethods.Length;
         // In the coordinate route switch every visible rep together, e.g. all three MutL domains;
         // the configured index may be a hidden rep such as the default Lines.
         if (CoordinateOwnsDisplay && !IsBusy && client != null && client.IsConnected)
         {
+            // A change is still being applied (VMD restyles every rep, then Unity reloads). A press
+            // now would interrupt it halfway and leave the reps in different methods, so it waits.
+            if (trajectory.IsSwitching)
+            {
+                Debug.Log("[RepresentationController] Drawing-method change still in progress; press ignored.", this);
+                return;
+            }
             List<int> visible = trajectory.DisplayedRepresentationIds();
             if (visible.Count > 0)
             {
-                Debug.Log($"[RepresentationController] {currentDrawingMethod} -> {SupportedMethods[next]} for reps {string.Join(", ", visible)}.", this);
-                trajectory.ChangeRepresentations(visible, SupportedMethods[next]);
+                // The first press, or the first one for another molecule, starts the cycle at
+                // Original from the methods the scene uses now.
+                if (cycle == null || trajectory.MoleculeId != cycleMolecule)
+                {
+                    cycle = VMDDrawingMethodCycle.Build(trajectory.DisplayedMethods());
+                    cycleMolecule = trajectory.MoleculeId;
+                    cycledMethod = VMDDrawingMethodCycle.Original;
+                }
+                string target = VMDDrawingMethodCycle.Next(cycle, cycledMethod, direction);
+                Debug.Log($"[RepresentationController] {cycledMethod} -> {target} for reps {string.Join(", ", visible)} " +
+                          $"(cycle {string.Join(" > ", cycle)}).", this);
+                trajectory.ChangeRepresentations(visible, target);
+                cycledMethod = target;
                 return;
             }
         }
-        // Mesh route, or no visible rep known yet: change only the configured rep.
-        if (!SetRepresentation(representationIndex, SupportedMethods[next]))
-            Debug.LogWarning($"[RepresentationController] '{name}' cannot switch to {SupportedMethods[next]} now " +
+        // Mesh route, or no visible rep known yet: change only the configured rep, through every method.
+        string next = VMDDrawingMethodCycle.Next(VMDDrawingMethodCycle.Build(null), cycledMethod ?? currentDrawingMethod, direction);
+        if (SetRepresentation(representationIndex, next)) cycledMethod = next;
+        else
+            Debug.LogWarning($"[RepresentationController] '{name}' cannot switch to {next} now " +
                              $"(client: {(client != null ? client.name : "none")}, connected: {client != null && client.IsConnected}, " +
                              $"trajectory: {(trajectory != null ? trajectory.name : "none")}, busy: {IsBusy}, live route: {CoordinateOwnsDisplay}).", this);
     }

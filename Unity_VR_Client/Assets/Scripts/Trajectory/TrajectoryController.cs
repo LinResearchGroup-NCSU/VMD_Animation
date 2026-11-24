@@ -492,6 +492,9 @@ public class TrajectoryController : MonoBehaviour
     {
         Pause();
         RefreshCoordinates();
+        // IsSwitching stays true until the reload has finished or failed; RepresentationController
+        // ignores further presses meanwhile, so one change is never interrupted halfway.
+        switching = true;
         // Run sets 'busy' at once, so Update does not open the Pending route in the meantime.
         Run(async (token, version) =>
         {
@@ -504,8 +507,28 @@ public class TrajectoryController : MonoBehaviour
                 }
                 await Open(token, version);
             }
-            await Open(token, version);
+            finally { switching = false; }
         });
+    }
+
+    // A drawing-method change started by ChangeRepresentations is still being applied.
+    public bool IsSwitching => switching;
+    private bool switching;
+
+    // VMD molecule ID of the current snapshot, -1 without one.
+    public int MoleculeId => metadata?.molecule ?? -1;
+
+    // Drawing method of every rep the coordinate route draws (VDW, CPK, NewCartoon, QuickSurf), in
+    // the order of DisplayedRepresentationIds' sources; empty without a snapshot.
+    // RepresentationController builds its drawing-method cycle from it.
+    public List<string> DisplayedMethods()
+    {
+        var methods = new List<string>();
+        if (metadata == null) return methods;
+        foreach (var rep in metadata.reps) methods.Add(rep.method);
+        if (metadata.cartoons != null) foreach (var cartoon in metadata.cartoons) methods.Add("NewCartoon");
+        if (metadata.quicksurfs != null) foreach (var surface in metadata.quicksurfs) methods.Add("QuickSurf");
+        return methods;
     }
 
     // VMD rep indices drawn by the coordinate route, in VMD order; empty until its metadata is
@@ -676,7 +699,7 @@ public class TrajectoryController : MonoBehaviour
                 break;
             default:
                 label = "Preparing";
-                state = "Reading VMD representations";
+                state = switching ? "Switching drawing method" : "Reading VMD representations";
                 frame = FrameText(-1, 0);
                 detail = note;
                 break;

@@ -265,7 +265,7 @@ The current command protocol supports:
 | `GET_COORDS` | Return the current top molecule's atom coordinates. |
 | `GET_SCENE_STATE` | Return the scene signature used to detect representation, visibility and frame changes. |
 | `EXPORT_SCENE <requestId>` | Export the visible VMD scene to OBJ/MTL and return its local path. |
-| `SET_REPRESENTATION <requestId> <repIndex> <method>` | Change the top molecule's specified representation in VMD, then export the scene. Supported methods: VDW, CPK, QuickSurf, NewCartoon. |
+| `SET_REPRESENTATION <requestId> <repIndex> <method>` | Change the top molecule's specified representation in VMD, then export the scene. Supported methods: VDW, CPK, QuickSurf, NewCartoon, and Original (the rep's style before the bridge first changed it). NewCartoon returns a rep without a protein backbone, or with nucleic acid, to its original style; QuickSurf keeps a rep's original QuickSurf parameters. |
 | `RELEASE_SCENE <requestId>` | Release an export's import lease after Unity has finished reading its files. |
 | `TRAJ_OPEN <requestId>` | Check compatibility and return a coordinate snapshot's token, metadata and initial transform. |
 | `TRAJ_READ <requestId> <token> <start> <count>` | Read a bounded batch of coordinates without changing VMD's displayed frame. |
@@ -398,7 +398,7 @@ In Simulator and Headset modes, hold a controller's grip button on the molecule,
 | Input | Action |
 | --- | --- |
 | Right A (primary button) | Play / Pause. |
-| Right B (secondary button) | Next drawing method (VDW → CPK → QuickSurf → NewCartoon) for every visible representation, keeping their selections and colors. |
+| Right B (secondary button) | Next drawing method for every visible representation, keeping their selections and colors. The cycle starts at the scene's own look (Original) and goes Original → VDW → CPK → QuickSurf → NewCartoon → Original; a method that every rep already used at the start is left out, because Original shows it with the script's own parameters. QuickSurf keeps a rep's original QuickSurf parameters; NewCartoon returns reps it cannot draw (lipids, ions, water, nucleic acid) to their original style. Presses during a change are ignored (status: Switching drawing method). |
 | Right thumbstick left / right | Previous / next frame; repeats while held. Ignored while the molecule is grabbed. |
 | Left X / Y (left A / B on Index controllers) | Back / forward 100 frames. |
 | Left thumbstick click | Recenter: restore the initial orientation, size and position in front of where the user is looking. |

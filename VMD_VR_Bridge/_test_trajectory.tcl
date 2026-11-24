@@ -118,6 +118,24 @@ if {[catch {
     mol selupdate 0 $m on
     check dynamic-selection-fallback [string match {*"supported":false*} [::vrbridge::handle_command "TRAJ_OPEN dynamic" client]]
     mol selupdate 0 $m off
+    # Drawing-method cycle (TRAJ_STYLE) on a rep with tuned QuickSurf parameters. The fixture has
+    # no CA atoms, so NewCartoon cannot draw it.
+    mol representation QuickSurf 1.5 0.5 3.0 1
+    mol selection all
+    mol addrep $m
+    set tuned [expr {[molinfo $m get numreps] - 1}]
+    proc style_of {m r} { return [lindex [molinfo $m get [list [list rep $r]]] 0] }
+    ::vrbridge::handle_command "TRAJ_STYLE cycle1 $tuned VDW" client
+    check cycle-fixed-style [expr {[style_of $m $tuned] eq "VDW 1.0 12"}]
+    ::vrbridge::handle_command "TRAJ_STYLE cycle2 $tuned QuickSurf" client
+    check cycle-quicksurf-keeps-original-parameters [string match {QuickSurf 1.5 0.5 3.0 1*} [style_of $m $tuned]]
+    ::vrbridge::handle_command "TRAJ_STYLE cycle3 $tuned CPK" client
+    ::vrbridge::handle_command "TRAJ_STYLE cycle4 $tuned NewCartoon" client
+    check cycle-newcartoon-skip-restores-original [string match {QuickSurf 1.5 0.5 3.0 1*} [style_of $m $tuned]]
+    ::vrbridge::handle_command "TRAJ_STYLE cycle5 $tuned VDW" client
+    ::vrbridge::handle_command "TRAJ_STYLE cycle6 $tuned Original" client
+    check cycle-original-restores [string match {QuickSurf 1.5 0.5 3.0 1*} [style_of $m $tuned]]
+    mol delrep $tuned $m
     # Disconnecting a client removes its snapshot.
     ::vrbridge::handle_command "TRAJ_OPEN owner" client
     ::vrbridge::trajectory_disconnect client

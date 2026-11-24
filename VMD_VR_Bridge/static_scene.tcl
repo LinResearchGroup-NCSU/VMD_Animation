@@ -330,13 +330,35 @@ proc ::vrbridge::scene_write_export {request_id} {
 }
 
 # Set the drawing method of representation rep_index of the top molecule to method: VDW, CPK,
-# QuickSurf or NewCartoon (in any letter case), with the fixed parameters listed below.
-# Raises an error for an invalid index or any other method.
+# QuickSurf or NewCartoon (in any letter case), with the fixed parameters listed below, or
+# Original: the style the rep had before the bridge first changed it.
+# - The first change of a rep records its style in scene_original_styles (keyed by molecule and
+#   rep name, which survives rep deletions), so Original can return to the scene's own look
+#   after Unity's drawing-method cycle has replaced it. Original on a rep never changed is a
+#   no-op.
+# - NewCartoon is applied only to a rep that has a protein backbone (cartoon_backbone) and no
+#   nucleic acid: NewCartoon draws nothing for lipids, ions or water, and a nucleic-acid cartoon
+#   sends the whole scene to the VMD mesh route. Such a rep returns to its original style (it
+#   keeps its current style if the bridge never changed it), so the scene keeps its own look
+#   around the protein cartoon instead of the previous cycle step's.
+# - QuickSurf keeps the original QuickSurf parameters of a rep that was QuickSurf before the
+#   bridge first changed it (a script may tune them, for example a larger radius scale for
+#   sparse coarse-grained beads); other reps get the fixed parameters below.
+# Returns the style now in use. Raises an error for an invalid index or any other method.
 # Called by scene_export for SET_REPRESENTATION and by trajectory_command for TRAJ_STYLE.
 proc ::vrbridge::scene_set_representation {rep_index method} {
+    variable scene_original_styles
+    if {![info exists scene_original_styles]} { set scene_original_styles [dict create] }
     set molid [::vrbridge::top_molecule]
     set maximum [expr {[molinfo $molid get numreps] - 1}]
     set rep_index [::vrbridge::integer_in_range $rep_index 0 $maximum representation]
+    set key [list $molid [mol repname $molid $rep_index]]
+    set current [lindex [molinfo $molid get [list [list rep $rep_index]]] 0]
+    set original [expr {[dict exists $scene_original_styles $key] ? [dict get $scene_original_styles $key] : $current}]
+    if {[string equal -nocase $method Original]} {
+        if {[dict exists $scene_original_styles $key]} { mol modstyle $rep_index $molid {*}[dict get $scene_original_styles $key] }
+        return [lindex [molinfo $molid get [list [list rep $rep_index]]] 0]
+    }
     # Whitelist commands: no eval or arbitrary Tcl received from Unity.
     # Extension point for Unity-initiated representation changes: add a case below
     # with the new method's VMD style/default parameters, and register its name in
@@ -347,10 +369,27 @@ proc ::vrbridge::scene_set_representation {rep_index method} {
         CPK { set style {CPK 1.0 0.3 12 12} }
         QuickSurf { set style {QuickSurf 1.0 0.5 2.0 1} }
         NewCartoon { set style {NewCartoon 0.3 10 4.1 0} }
-        default { error "Supported methods: VDW CPK QuickSurf NewCartoon" }
+        default { error "Supported methods: VDW CPK QuickSurf NewCartoon Original" }
     }
+    if {[string equal -nocase $method NewCartoon]} {
+        set selection [lindex [molinfo $molid get [list [list selection $rep_index]]] 0]
+        set backbone [atomselect $molid "($selection) and ([::vrbridge::cartoon_backbone])"]
+        set nucleic [atomselect $molid "($selection) and nucleic"]
+        set drawable [expr {[$backbone num] > 0 && [$nucleic num] == 0}]
+        $backbone delete
+        $nucleic delete
+        if {!$drawable} {
+            if {$original ne $current} { mol modstyle $rep_index $molid {*}$original }
+            return $original
+        }
+    }
+    if {[string equal -nocase $method QuickSurf] && [string equal -nocase [lindex $original 0] QuickSurf]} {
+        set style [lreplace $original 0 0 QuickSurf]
+    }
+    if {![dict exists $scene_original_styles $key]} { dict set scene_original_styles $key $current }
     # Changing only the drawing method preserves selection, coloring and material.
     mol modstyle $rep_index $molid {*}$style
+    return $style
 }
 
 # Handle EXPORT_SCENE and SET_REPRESENTATION.
