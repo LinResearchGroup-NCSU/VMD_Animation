@@ -14,8 +14,10 @@ set "KIND=%~1"
 set "STEREO=MultiPass"
 if /i "%~2"=="SPI" set "STEREO=SPI"
 set "PLAYER=%~dp0%STEREO%\Unity_VR_Client.exe"
-if not exist "%PLAYER%" (
-    echo The player was not found: %PLAYER%
+rem Inside parenthesized blocks the path is read with !PLAYER!: a folder name with ")", such as
+rem "VMD_VR_Lab (1)" from a second download, would otherwise end the block and stop this script.
+if not exist "!PLAYER!" (
+    echo The player was not found: !PLAYER!
     echo Extract the whole zip first ^(right-click the zip, Extract All^), then run this file from the extracted folder.
     pause
     exit /b 1
@@ -23,7 +25,7 @@ if not exist "%PLAYER%" (
 
 if /i "%KIND%"=="desktop" (
     echo Starting the player without a headset.
-    start "" "%PLAYER%" -desktop
+    start "" "!PLAYER!" -desktop
     exit /b 0
 )
 

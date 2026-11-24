@@ -405,6 +405,21 @@ function Copy-Player([string]$Mode, [string]$Destination) {
     New-Item -ItemType Directory -Force -Path $Destination | Out-Null
     Get-ChildItem -LiteralPath $source | Where-Object { $_.Name -notmatch '_DoNotShip$|_ButDontShipItWithYourGame$' } |
         ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $Destination -Recurse -Force }
+    # Assemblies compiled on this PC record their debug-symbol path, which contains the Windows
+    # user name (C:\Users\<name>\...). Only debuggers read that path, so in the bundle's copies the
+    # name is replaced by the same number of x characters; the files keep their size and layout.
+    $userName = Split-Path -Leaf $env:USERPROFILE
+    if ($userName) {
+        $latin1 = [System.Text.Encoding]::GetEncoding(28591)
+        $pattern = '(?i)\\Users\\' + [regex]::Escape($userName) + '\\'
+        $replacement = '\Users\' + ('x' * $userName.Length) + '\'
+        Get-ChildItem -LiteralPath $Destination -Recurse -File -Filter '*.dll' | ForEach-Object {
+            $text = $latin1.GetString([System.IO.File]::ReadAllBytes($_.FullName))
+            if ($text -match $pattern) {
+                [System.IO.File]::WriteAllBytes($_.FullName, $latin1.GetBytes(($text -replace $pattern, $replacement.Replace('$', '$$'))))
+            }
+        }
+    }
 }
 
 function Invoke-Deploy {
@@ -430,7 +445,7 @@ function Invoke-Deploy {
     Get-ChildItem -LiteralPath (Join-Path $Root 'VMD_VR_Bridge') -Filter '*.tcl' | Where-Object { $_.Name -notlike '_test_*' } |
         ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $bridge.FullName }
     $animation = New-Item -ItemType Directory -Force -Path (Join-Path $bundle 'animation')
-    foreach ($file in @('render.tcl', 'split_large_reps.tcl')) { Copy-Item -LiteralPath (Join-Path $Root "animation\$file") -Destination $animation.FullName }
+    foreach ($file in @('render.tcl', 'split_large_reps.tcl', 'vr_prepare.tcl')) { Copy-Item -LiteralPath (Join-Path $Root "animation\$file") -Destination $animation.FullName }
     $data = New-Item -ItemType Directory -Force -Path (Join-Path $bundle 'data')
     foreach ($file in @('mutl_open_CA.pdb', 'Example_Trajectory.xtc')) { Copy-Item -LiteralPath (Join-Path $Root "data\$file") -Destination $data.FullName }
     if ($LocalExamples) {
@@ -445,6 +460,11 @@ function Invoke-Deploy {
             'In the VMD Tk Console, after cd to this folder (see INSTRUCTIONS.txt), run one of these',
             'instead of "source animation/render.tcl", then "source start_vr.tcl":', '')
         foreach ($script in $extraScripts) { $lines += "  source animation/$($script.Name)" }
+        $lines += @('', 'A scene whose script uses drawing methods Unity cannot draw itself (Lines, Licorice,',
+            'Points, smoothing, transparent materials) can be adapted first, before start_vr.tcl',
+            '(see the comments at the top of animation/vr_prepare.tcl):', '',
+            '  source animation/vr_prepare.tcl', '  vr_prepare -check', '  vr_prepare', '',
+            'vr_unprepare restores the original reps.')
         $lines += @('', 'A large system that looks coarse in the headset can be split into smaller QuickSurf',
             'reps first (see the comments at the top of animation/split_large_reps.tcl), for example:', '',
             '  source animation/split_large_reps.tcl', '  split_large_reps top -unit block 1268', '',
