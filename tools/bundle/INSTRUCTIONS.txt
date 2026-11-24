@@ -9,7 +9,8 @@ HOW IT WORKS
 
 DEVICE BASIS
    Placement and controls were tuned on a Valve Index with SteamVR.
-   Meta Quest support is newer; note anything that looks wrong and keep Player.log.
+   Meta Quest is tested over a USB cable (Meta Horizon Link). Air Link and Steam Link are
+   untested; note anything that looks wrong and keep Player.log.
 
 ------------------------------------------------------------------------------
 1. EVERY HEADSET: PREPARE

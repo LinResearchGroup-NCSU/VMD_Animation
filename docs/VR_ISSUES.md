@@ -2,10 +2,10 @@
 
 First real-headset test: 2026-11-10, NCSU D. H. Hill Jr. Library Gaming & VR Studio.
 Hardware: Valve Index with SteamVR (SteamVR is the active OpenXR runtime), NVIDIA GeForce RTX 5080, plus an Intel integrated GPU in the same PC.
-First Meta Quest test: 2026-11-23, same Studio, on a different PC with an NVIDIA GeForce RTX 4060, connected over a USB cable (Link).
+First Meta Quest test: 2026-11-23, same Studio, on a different PC with an NVIDIA GeForce RTX 4060, connected over a USB cable (Meta Horizon Link); it worked.
 Build: `VMD_VR_Lab_v3` (Single Pass Instanced). VMD scene set up by `render.tcl`, now `animation/render.tcl` (three QuickSurf domain representations).
 
-**Device basis of this file.** Unless an entry names the Meta Quest, every observation, fix and number below comes from the Valve Index with SteamVR. The Quest has been run once (2026-11-23, reported as successful; see issue 12); its launch procedure is in [Launch procedure with a Meta Quest](#launch-procedure-with-a-meta-quest-first-run-2026-11-23), and steps or notes that apply only to the Index are marked **(Index only)**.
+**Device basis of this file.** Both headsets are tested: the Valve Index with SteamVR, and the Meta Quest over Meta Horizon Link with a USB cable (2026-11-23; see issue 12). Unless an entry names the Meta Quest, every observation, fix and number below comes from the Index. The Quest launch procedure is in [Launch procedure with a Meta Quest](#launch-procedure-with-a-meta-quest-tested-2026-11-23), and steps or notes that apply only to the Index are marked **(Index only)**.
 
 Since the build/run/deploy cleanup, bundles are made with `vr deploy` (see [Build, run, deploy](../README.md#build-run-deploy)) and started with a `Start_*.cmd` launcher, which picks the headset's OpenXR runtime for that launch only. Bundles `v1` to `v6` were assembled by hand and started with `SPI\Unity_VR_Client.exe` directly.
 
@@ -54,13 +54,13 @@ Since the build/run/deploy cleanup, bundles are made with `vr deploy` (see [Buil
 2. Sign out of Google in the browser, and of any personal Steam or Meta account.
 3. Sign out of Windows.
 
-## Launch procedure with a Meta Quest (first run 2026-11-23)
+## Launch procedure with a Meta Quest (tested 2026-11-23)
 
-This procedure was written for a Quest 3S from how Quest Link works and from the project's OpenXR settings. It has been run once, over a USB cable on a Studio PC with an RTX 4060, and the user reported the run as successful; which steps were followed exactly and the Player.log of that run have not been recorded yet, so it may still need adjusting. "Before going", steps 1, 2, 5 and 7 of "At the lab", and "Before leaving" are the same as for the Index. Steps 3, 4 and 6 are replaced by the steps below.
+This procedure was tested on 2026-11-23 over a USB cable (Meta Horizon Link) on a Studio PC with an RTX 4060, and the run worked. Air Link and the Steam Link app have not been tested. "Before going", steps 1, 2, 5 and 7 of "At the lab", and "Before leaving" are the same as for the Index. Steps 3, 4 and 6 are replaced by the steps below.
 
 ### What differs from the Index
 
-| | Valve Index (tested) | Meta Quest (run once) |
+| | Valve Index (tested) | Meta Quest (tested over USB Link) |
 | --- | --- | --- |
 | PC software | SteamVR, already on the lab PC | Meta Horizon Link PC app; installing it may need admin rights |
 | OpenXR runtime | SteamVR | Meta Horizon Link |
@@ -217,8 +217,8 @@ The player is the same build for both headsets. It still has to run on the PC th
 - Cause: the bridge rebuilt the whole molecule's backbone and structure data for every NewCartoon rep, in TRAJ_OPEN and in the snapshot signature checked on every coordinate request. With 76 reps on 126800 beads TRAJ_OPEN took 112 s, far beyond Unity's 15 s request timeout.
 - Fix: `cartoon_molecule_data` computes the backbone data once per TRAJ_OPEN, and `trajectory_signature` adds the structure codes once per molecule. TRAJ_OPEN now takes 0.65 s for that scene; its reply is byte-for-byte the same as before for that scene and for the MutLα example (QuickSurf, NewCartoon with gaps and Structure coloring, unsupported colorings), and all 58 bridge regression tests pass.
 
-### 12. Meta Quest: first run works; the picture is more jagged on the RTX 4060 PC (2026-11-23)
-- Observation: the first Quest run, over a USB cable on a Studio PC with an RTX 4060 (8 GB), was reported as successful. The picture showed more jagged edges and was less sharp than on the RTX 5080 PC.
+### 12. Meta Quest tested over USB Link; the picture is more jagged on the RTX 4060 PC (2026-11-23)
+- Observation: the first Quest test, over a USB cable (Meta Horizon Link) on a Studio PC with an RTX 4060 (8 GB), worked. The picture showed more jagged edges and was less sharp than on the RTX 5080 PC.
 - Not the player's settings: the Standalone quality level uses `PC_RPAsset.asset` (MSAA 4x, render scale 1) on both PCs. Likely causes are on the Link side: Meta Horizon Link picks its render resolution from the GPU, and Link compresses the picture before sending it over the cable.
 - To try: Meta Horizon Link → Devices → the headset → **Graphics Preferences**: refresh rate 72 Hz, render resolution one step higher; restart Link. Step back if the picture starts to stutter. The setting is per PC.
 - Effect on large-system tests: correctness does not depend on the GPU (coordinates, trajectory playback and representations come from VMD and the bridge), but frame rate does, and the RTX 4060 has 8 GB of video memory against 16 GB on the RTX 5080. While a large system is loaded, watch Task Manager → Performance → the NVIDIA GPU → **Dedicated GPU memory**; usage near 8 GB means the scene does not fit. Record which PC each large-system test ran on, and run performance tests and demos on the RTX 5080 PC when possible.

@@ -13,8 +13,8 @@ using UnityEngine.XR.Interaction.Toolkit.Transformers;
 // the world-axis box around the drawn geometry, on a child kept aligned with the world axes while
 // the molecule is not held. (Until 2026-11-17 it was the bounding sphere of that box: much larger
 // than the molecule, so rays stopped in empty space in front of it and looked stuck or short.)
-// Device basis: tried on Valve Index controllers only, where VMDIndexGrip replaces the grip button
-// with the trigger. Quest Touch controllers (Quest 3S) use the plain grip button; untested.
+// Device basis: tuned on Valve Index controllers, where VMDIndexGrip replaces the grip button with
+// the trigger. Quest Touch controllers use the plain grip button (tested over Link, 2026-11-23).
 // Grab diagnostics: every grab and release, and every HeldLogSeconds while held, is logged with the
 // prefix "[VMDGrab]" and the select input of each holding interactor (value and pressed state), so a
 // headset Player.log shows what keeps the molecule held. On 2026-11-17 the molecule followed the

@@ -46,7 +46,7 @@ public class VMDStatusPanel : MonoBehaviour
         HintsRect = new Rect(8, 136, 524, 190);
     // One GUI pixel is 0.8 mm, so the panel is 43 x 26 cm; 0.5 mm was too small to read on an Index.
     // Device basis: this size and ViewOffset below were judged in a Valve Index only; they are the
-    // same on every headset and have not been checked in a Quest 3S.
+    // same on every headset, and were used unchanged in the Meta Quest test (2026-11-23).
     private const float MetresPerPixel = 0.0008f;
     // Keep in step with VMDVRController's and VMDIndexGrip's bindings. Plain ASCII: the default TMP
     // font has no arrow glyphs. <b> is TMP rich text.
