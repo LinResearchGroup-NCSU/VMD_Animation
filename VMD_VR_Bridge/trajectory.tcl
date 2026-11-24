@@ -2,7 +2,7 @@
 # file sources cartoon.tcl and quicksurf.tcl for the NewCartoon and QuickSurf metadata.
 #
 # Commands implemented here (::vrbridge::handle_command passes them to trajectory_command):
-#   TRAJ_OPEN <requestId>                           Check compatibility and open a snapshot.
+#   TRAJ_OPEN <requestId> [subset]                  Check compatibility and open a snapshot.
 #   TRAJ_READ <requestId> <token> <start> <count>   Read a bounded batch of coordinate frames.
 #   TRAJ_CHECK <requestId> <token>                  Validate the snapshot; report VMD's frame.
 #   TRAJ_SYNC <requestId> <token> <frame>           Set VMD's displayed frame.
@@ -16,9 +16,20 @@
 # Unity side is Assets/Scripts/Trajectory/TrajectoryController.cs.
 #
 # Bounded coordinate reads. No render, temporary files, animate goto, or display update.
+#
+# Streamed subset: a client that sends "TRAJ_OPEN <requestId> subset" may receive coordinates for
+# only the atoms its renderers use. When the visible reps use fewer atoms than the molecule has,
+# the TRAJ_OPEN reply adds "streamed" (those atom indices, ascending), and every TRAJ_READ frame
+# then holds "positions" for those atoms only plus "mean", the mean position of ALL atoms of that
+# frame. The client puts the positions back at their atom indices and fills the other atoms so
+# that the whole frame keeps that mean, because its renderers center the molecule on the mean of
+# all atoms of the first frame. Without "subset", or when the reps use every atom, replies are
+# exactly as before. So a large solvated system no longer sends its hidden solvent every frame,
+# and nothing else changes.
 
 # trajectory_sessions maps a client channel to its snapshot: a list of the token, the
-# molecule ID and the trajectory_signature taken at TRAJ_OPEN.
+# molecule ID, the trajectory_signature taken at TRAJ_OPEN, and the VMD selection text of the
+# streamed atoms ("" when every atom is sent).
 namespace eval ::vrbridge { variable trajectory_sessions; array set trajectory_sessions {} }
 source [file join [file dirname [info script]] cartoon.tcl]
 source [file join [file dirname [info script]] quicksurf.tcl]
@@ -107,8 +118,10 @@ proc ::vrbridge::trajectory_atom_colors {sel coloring} {
 # and coloring, no periodic images, no smoothing and an opaque material. Otherwise an error is
 # raised; trajectory_command reports it as "supported":false with the message, and Unity then
 # shows the scene through the VMD mesh route.
+# subset: 1 when the client accepts a streamed subset (see the header); the reply then adds
+# "streamed" when the reps use fewer atoms than the molecule has.
 # Called by trajectory_command for TRAJ_OPEN.
-proc ::vrbridge::trajectory_metadata {owner} {
+proc ::vrbridge::trajectory_metadata {owner {subset 0}} {
     variable trajectory_sessions
     set m [::vrbridge::top_molecule]
     foreach other [molinfo list] {
@@ -181,9 +194,43 @@ proc ::vrbridge::trajectory_metadata {owner} {
     if {![llength $reps] && ![llength $cartoons] && ![llength $surfaces]} { error "No visible coordinate representations" }
     # Every snapshot gets a new token; TRAJ_READ, TRAJ_CHECK and TRAJ_SYNC must present it.
     set token [clock clicks]
-    set trajectory_sessions($owner) [list $token $m [::vrbridge::trajectory_signature]]
+    # The atoms the client's renderers read: every index listed in the reps' "indices" (bonds
+    # pair selected atoms) and the cartoons' "indices", "carbons" and "oxygens" (-1 means none).
+    set streamed {}
+    set streamedText ""
+    if {$subset} {
+        set used [dict create]
+        foreach json [concat $reps $cartoons $surfaces] {
+            foreach {whole list} [regexp -all -inline {"(?:indices|carbons|oxygens)":\[([^\]]*)\]} $json] {
+                foreach atom [split $list ,] { if {$atom ne "" && $atom >= 0} { dict set used $atom 1 } }
+            }
+        }
+        if {[dict size $used] < $n} {
+            set streamed [lsort -integer [dict keys $used]]
+            set streamedText [::vrbridge::trajectory_index_text $streamed]
+        }
+    }
+    set trajectory_sessions($owner) [list $token $m [::vrbridge::trajectory_signature] $streamedText]
     set matrix [transmult [lindex [molinfo $m get global_matrix] 0] [lindex [molinfo $m get scale_matrix] 0] [lindex [molinfo $m get rotate_matrix] 0] [lindex [molinfo $m get center_matrix] 0]]
-    return [format {"supported":true,"token":"%s","molecule":%d,"atomCount":%d,"frameCount":%d,"frame":%d,"matrix":[%s],"reps":[%s],"cartoons":[%s],"quicksurfs":[%s]} $token $m $n $total [molinfo $m get frame] [join [concat {*}$matrix] ,] [join $reps ,] [join $cartoons ,] [join $surfaces ,]]
+    set result [format {"supported":true,"token":"%s","molecule":%d,"atomCount":%d,"frameCount":%d,"frame":%d,"matrix":[%s],"reps":[%s],"cartoons":[%s],"quicksurfs":[%s]} $token $m $n $total [molinfo $m get frame] [join [concat {*}$matrix] ,] [join $reps ,] [join $cartoons ,] [join $surfaces ,]]
+    if {$streamedText ne ""} { append result [format {,"streamed":[%s]} [join $streamed ,]] }
+    return $result
+}
+
+# Return VMD selection text for an ascending list of atom indices, as compact
+# "index a to b c ..." ranges. Called by trajectory_metadata for the streamed atoms.
+proc ::vrbridge::trajectory_index_text {indices} {
+    set parts {}
+    set start [lindex $indices 0]
+    set prev $start
+    foreach i [lrange $indices 1 end] {
+        if {$i == $prev + 1} { set prev $i; continue }
+        lappend parts [expr {$start == $prev ? $start : "$start to $prev"}]
+        set start $i
+        set prev $i
+    }
+    lappend parts [expr {$start == $prev ? $start : "$start to $prev"}]
+    return "index [join $parts { }]"
 }
 
 # Handle the TRAJ_ commands.
@@ -202,10 +249,14 @@ proc ::vrbridge::trajectory_command {command args owner} {
         ::vrbridge::scene_request_id $id
         switch -- $command {
             TRAJ_OPEN {
-                if {[llength $args] != 1} { error "Usage: TRAJ_OPEN requestId" }
+                if {[llength $args] == 2 && [lindex $args 1] eq "subset"} {
+                    set subset 1
+                } elseif {[llength $args] == 1} {
+                    set subset 0
+                } else { error "Usage: TRAJ_OPEN requestId ?subset?" }
                 # A scene that cannot be drawn from coordinates is a normal reply
                 # ("supported":false), not an "error" reply.
-                if {[catch {::vrbridge::trajectory_metadata $owner} data]} {
+                if {[catch {::vrbridge::trajectory_metadata $owner $subset} data]} {
                     catch {unset trajectory_sessions($owner)}
                     set data "\"supported\":false,\"message\":[::vrbridge::scene_json_string $data]"
                 }
@@ -220,7 +271,7 @@ proc ::vrbridge::trajectory_command {command args owner} {
             TRAJ_READ - TRAJ_CHECK - TRAJ_SYNC {
                 # All three require the client's current token and an unchanged signature.
                 if {![info exists trajectory_sessions($owner)]} { error "Trajectory snapshot expired" }
-                lassign $trajectory_sessions($owner) token m signature
+                lassign $trajectory_sessions($owner) token m signature streamedText
                 if {[lindex $args 1] ne $token || $signature ne [::vrbridge::trajectory_signature]} { error "Trajectory settings changed" }
                 if {$command eq "TRAJ_CHECK"} {
                     if {[llength $args] != 2} { error "Usage: TRAJ_CHECK requestId token" }
@@ -235,22 +286,42 @@ proc ::vrbridge::trajectory_command {command args owner} {
                     set start [::vrbridge::integer_in_range [lindex $args 2] 0 [expr {[molinfo $m get numframes]-1}] start]
                     # At most 4 frames, about 1M floats, per response. A large single frame is allowed.
                     # TrajectoryController applies the same limit when it chooses count.
-                    set maximum [expr {max(1,min(4,1000000 / (3 * [molinfo $m get numatoms])))}]
+                    # With a streamed subset the limit counts the streamed atoms.
+                    set sent [molinfo $m get numatoms]
+                    if {$streamedText ne ""} {
+                        set counted [atomselect $m $streamedText]
+                        set sent [$counted num]
+                        $counted delete
+                    }
+                    set maximum [expr {max(1,min(4,1000000 / (3 * $sent)))}]
                     set count [::vrbridge::integer_in_range [lindex $args 3] 1 $maximum count]
                     set count [expr {min($count,[molinfo $m get numframes]-$start)}]
                     # Read through an atom selection that is moved from frame to frame, so
                     # VMD's displayed frame does not change.
                     set sel [atomselect $m all frame $start]
+                    set part ""
                     set code [catch {
                         set frames {}
-                        for {set f $start} {$f < $start+$count} {incr f} {
-                            $sel frame $f
-                            set flat [concat {*}[$sel get {x y z}]]
-                            lappend frames [format {{"positions":[%s]}} [join $flat ,]]
+                        if {$streamedText eq ""} {
+                            for {set f $start} {$f < $start+$count} {incr f} {
+                                $sel frame $f
+                                set flat [concat {*}[$sel get {x y z}]]
+                                lappend frames [format {{"positions":[%s]}} [join $flat ,]]
+                            }
+                        } else {
+                            # Streamed subset: those atoms' positions, plus the mean of all atoms.
+                            set part [atomselect $m $streamedText frame $start]
+                            for {set f $start} {$f < $start+$count} {incr f} {
+                                $sel frame $f
+                                $part frame $f
+                                set flat [concat {*}[$part get {x y z}]]
+                                lappend frames [format {{"positions":[%s],"mean":[%s]}} [join $flat ,] [join [measure center $sel] ,]]
+                            }
                         }
                         set data [format {"ok":true,"start":%d,"frames":[%s]} $start [join $frames ,]]
                     } message options]
                     $sel delete
+                    if {$part ne ""} { $part delete }
                     if {$code} { return -options $options $message }
                 }
             }

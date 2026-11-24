@@ -180,7 +180,14 @@ public class TrajectoryController : MonoBehaviour
     private async Task Open(CancellationToken token, int version)
     {
         note = "";
-        var reply = await subscribedClient.RequestTrajectory("TRAJ_OPEN", token);
+        // Ask for a streamed subset: VMD then sends only the atoms the reps use (see ExpandFrame).
+        // A bridge without that option rejects the extra word; open the usual way then.
+        VMDTrajectoryReply reply;
+        try { reply = await subscribedClient.RequestTrajectory("TRAJ_OPEN subset", token); }
+        catch (InvalidOperationException error) when (error.Message.StartsWith("Usage: TRAJ_OPEN", StringComparison.Ordinal))
+        {
+            reply = await subscribedClient.RequestTrajectory("TRAJ_OPEN", token);
+        }
         if (version != generation) return;
         bool hasCartoons = reply.cartoons != null && reply.cartoons.Length > 0;
         bool hasSurfaces = reply.quicksurfs != null && reply.quicksurfs.Length > 0;
@@ -195,6 +202,14 @@ public class TrajectoryController : MonoBehaviour
         if (reply.atomCount < 1 || reply.frameCount < 1 || reply.reps == null ||
             (reply.reps.Length == 0 && !hasCartoons && !hasSurfaces) || string.IsNullOrEmpty(reply.token))
             throw new FormatException("Invalid trajectory metadata.");
+        if (reply.streamed != null && reply.streamed.Length > 0)
+        {
+            // Ascending, in range and fewer than all atoms, as the bridge writes it.
+            if (reply.streamed.Length >= reply.atomCount) throw new FormatException("Invalid streamed atoms.");
+            for (int i = 0; i < reply.streamed.Length; i++)
+                if (reply.streamed[i] < 0 || reply.streamed[i] >= reply.atomCount || (i > 0 && reply.streamed[i] <= reply.streamed[i-1]))
+                    throw new FormatException("Invalid streamed atoms.");
+        }
         // Buffer size in frames: at most prefetchFrames and 64 MiB of positions (12 bytes per
         // atom), at least the two frames needed to advance, and no more than the trajectory has.
         capacity = Math.Max(2, Math.Min(prefetchFrames, (int)Math.Min(int.MaxValue, 64L*1024*1024 / (reply.atomCount*12L))));
@@ -227,6 +242,41 @@ public class TrajectoryController : MonoBehaviour
         repSummary = Describe(reply);
         route = Route.Coordinates;
         nextCheck = Time.unscaledTime + 0.75f;
+    }
+
+    // The snapshot sends only the streamed atoms (TRAJ_OPEN "subset" and a "streamed" list).
+    private bool Streaming => metadata?.streamed != null && metadata.streamed.Length > 0;
+
+    // Expand a streamed-subset frame to the full layout every renderer reads (x, y, z per atom of
+    // the molecule). The streamed atoms get their positions. Every other atom, which no visible
+    // rep draws, gets one shared position chosen so that the whole frame's mean equals the mean of
+    // all atoms sent by VMD: the renderers center the molecule on that mean of the first frame, so
+    // the molecule is placed exactly as when every atom was sent. Returns null for a malformed
+    // frame, which the caller reports as an invalid frame size.
+    private float[] ExpandFrame(VMDCoordinateFrame frame)
+    {
+        int[] streamed = metadata.streamed;
+        int n = metadata.atomCount;
+        if (frame?.positions == null || frame.positions.Length != streamed.Length*3 || frame.mean == null || frame.mean.Length != 3)
+            return null;
+        var full = new float[n*3];
+        double sx = 0, sy = 0, sz = 0;
+        for (int i = 0; i < streamed.Length; i++)
+        {
+            int a = streamed[i]*3, p = i*3;
+            full[a] = frame.positions[p]; full[a+1] = frame.positions[p+1]; full[a+2] = frame.positions[p+2];
+            sx += frame.positions[p]; sy += frame.positions[p+1]; sz += frame.positions[p+2];
+        }
+        int rest = n - streamed.Length;
+        float fx = (float)((frame.mean[0]*(double)n - sx) / rest);
+        float fy = (float)((frame.mean[1]*(double)n - sy) / rest);
+        float fz = (float)((frame.mean[2]*(double)n - sz) / rest);
+        for (int atom = 0, next = 0; atom < n; atom++)
+        {
+            if (next < streamed.Length && streamed[next] == atom) { next++; continue; }
+            full[atom*3] = fx; full[atom*3+1] = fy; full[atom*3+2] = fz;
+        }
+        return full;
     }
 
     // Coordinate route, every Update:
@@ -286,7 +336,9 @@ public class TrajectoryController : MonoBehaviour
             int start = missing;
             // At most 4 frames and about one million floats per request, which is also the
             // bridge's limit (trajectory.tcl); larger molecules are read one frame at a time.
-            int count = Math.Min(end-start, Math.Max(1, Math.Min(4, 1000000 / (metadata.atomCount*3))));
+            // With a streamed subset both count the streamed atoms.
+            int sent = Streaming ? metadata.streamed.Length : metadata.atomCount;
+            int count = Math.Min(end-start, Math.Max(1, Math.Min(4, 1000000 / (sent*3))));
             Run(async (token, version) =>
             {
                 var reply = await subscribedClient.RequestTrajectory("TRAJ_READ " + metadata.token + " " + start + " " + count, token);
@@ -294,7 +346,7 @@ public class TrajectoryController : MonoBehaviour
                 if (reply.start != start || reply.frames == null || reply.frames.Length != count) throw new FormatException("Invalid coordinate batch.");
                 for (int i = 0; i < reply.frames.Length; i++)
                 {
-                    float[] positions = reply.frames[i]?.positions;
+                    float[] positions = Streaming ? ExpandFrame(reply.frames[i]) : reply.frames[i]?.positions;
                     if (positions == null || positions.Length != metadata.atomCount*3) throw new FormatException("Invalid frame size.");
                     // A new seek may have overtaken this response.
                     if (start+i >= targetFrame && start+i < targetFrame+capacity) frames[start+i] = positions;
@@ -443,10 +495,14 @@ public class TrajectoryController : MonoBehaviour
         // Run sets 'busy' at once, so Update does not open the Pending route in the meantime.
         Run(async (token, version) =>
         {
-            foreach (int index in indices)
+            try
             {
-                await subscribedClient.RequestTrajectory("TRAJ_STYLE " + index + " " + method, token);
-                if (version != generation) return;
+                foreach (int index in indices)
+                {
+                    await subscribedClient.RequestTrajectory("TRAJ_STYLE " + index + " " + method, token);
+                    if (version != generation) return;
+                }
+                await Open(token, version);
             }
             await Open(token, version);
         });

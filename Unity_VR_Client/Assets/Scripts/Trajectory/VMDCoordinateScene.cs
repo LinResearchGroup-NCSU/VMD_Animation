@@ -28,9 +28,14 @@ using UnityEngine.Rendering;
     public VMDQuickSurfRepresentation[] quicksurfs;
     // TRAJ_READ only: consecutive frames, the first one being frame 'start'.
     public VMDCoordinateFrame[] frames;
+    // TRAJ_OPEN with "subset" only: the atoms whose positions TRAJ_READ sends, ascending. Empty or
+    // missing when every atom is sent (see TrajectoryController.ExpandFrame).
+    public int[] streamed;
 }
 // One frame: x, y, z of every atom of the molecule, in VMD coordinates (atomCount * 3 values).
-[Serializable] public sealed class VMDCoordinateFrame { public float[] positions; }
+// With a streamed subset, positions holds only the streamed atoms and mean is the mean position
+// of all atoms of that frame; TrajectoryController expands it to the full layout above.
+[Serializable] public sealed class VMDCoordinateFrame { public float[] positions, mean; }
 // One visible VDW or CPK rep. 'id' is the VMD rep index and 'method' is "VDW" or "CPK".
 [Serializable] public sealed class VMDAtomRepresentation
 {

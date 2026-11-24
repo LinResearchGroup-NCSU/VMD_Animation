@@ -81,6 +81,20 @@ if {[catch {
     check selection-invalidates [string match {*"error":*} [::vrbridge::handle_command "TRAJ_CHECK changed $token" client]]
     set selected [::vrbridge::handle_command "TRAJ_OPEN selected" client]
     check selection-preserved [string match {*"indices":\[0\]*"bonds":\[\]*} $selected]
+    # Streamed subset: with only atom 0 drawn, "TRAJ_OPEN ... subset" streams atom 0 alone, and
+    # each frame carries atom 0's position plus the mean of both atoms. Frame 3 has atom 0 at
+    # (3, 0, 0) and atom 1 at (4.3, 0, 3), so the mean is (3.65, 0, 1.5). Without "subset" the
+    # reply has no "streamed" field and frames carry every atom, as before.
+    set subset [::vrbridge::handle_command "TRAJ_OPEN subset subset" client]
+    check subset-streamed [string match {*"supported":true*"streamed":\[0\]*} $subset]
+    set token [lindex $::vrbridge::trajectory_sessions(client) 0]
+    set read [::vrbridge::handle_command "TRAJ_READ subsetread $token 3 1" client]
+    check subset-read [regexp {"positions":\[3(\.0+)?,0(\.0+)?,0(\.0+)?\],"mean":\[3\.6[45]\d*,0(\.0+)?,1\.5\d*\]} $read]
+    check subset-rejects-other-words [string match {*"error":*} [::vrbridge::handle_command "TRAJ_OPEN badword other" client]]
+    set plain [::vrbridge::handle_command "TRAJ_OPEN plain" client]
+    check plain-open-unchanged [expr {[string match {*"supported":true*} $plain] && ![string match {*"streamed"*} $plain]}]
+    set token [lindex $::vrbridge::trajectory_sessions(client) 0]
+    check plain-read-unchanged [string match {*"positions":\[3*,0*,0*,4.3*,0*,3*\]\}\]*} [::vrbridge::handle_command "TRAJ_READ plainread $token 3 1" client]]
     # QuickSurf with explicit parameters, then with the alternate spelling and no parameters.
     mol modselect 0 $m all
     mol modstyle 0 $m QuickSurf 1.0 0.5 1.0 1
@@ -88,6 +102,8 @@ if {[catch {
     puts $surface
     save_json quicksurf.json $surface
     check quicksurf-supported [string match {*"supported":true*"reps":\[\]*"cartoons":\[\]*"quicksurfs":\[\{"id":0,"indices":\[0,1\]*"radiusScale":1.0,"isovalue":0.5,"gridSpacing":1.0,"quality":1*} $surface]
+    # Every atom drawn: a subset request gets the usual reply, without "streamed".
+    check subset-all-atoms [expr {![string match {*"streamed"*} [::vrbridge::handle_command "TRAJ_OPEN surfacesubset subset" client]]}]
     set token [lindex $::vrbridge::trajectory_sessions(client) 0]
     check quicksurf-reads-coordinates [string match {*"ok":true*} [::vrbridge::handle_command "TRAJ_READ surfaceread $token 0 4" client]]
     mol modstyle 0 $m Quicksurf
