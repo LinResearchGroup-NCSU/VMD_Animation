@@ -1,13 +1,13 @@
 # VMD_Animation
 Here is a step-by-step guide to generate scientific presentation-ready movies of biomolecular conformational changes from raw MD trajectory. Enjoy!
 
-The repository also includes a local VMD → Unity viewer with coordinate playback, automatic representation synchronization, and VMD-generated geometry. See [VMD and Unity viewer](#vmd-and-unity-viewer) for setup and current limitations. The original movie-making workflow below remains available.
+The repository also includes a local VMD → Unity viewer with coordinate playback, automatic representation synchronization, and VMD-generated geometry. The same VMD scene serves both: set it up once, then render a movie or view it in VR. See [VR Quick Start](#vr-quick-start) for the VR steps and [VMD and Unity viewer](#vmd-and-unity-viewer) for details and current limitations. The original movie-making workflow below remains available.
 
 ## Repository layout
 
 | Path | Contents |
 | --- | --- |
-| `animation/` | Movie-making Tcl scripts: `render.tcl` (also sets up the VR sample scene), `Align_all_frames.tcl`, `with_capture.tcl`, `without_capture.tcl`, `visualization.tcl`, `la.tcl`, `orient.tcl`, `viewpoint_example.tcl`. |
+| `animation/` | Movie-making Tcl scripts: `render.tcl` (also sets up the VR sample scene), `Align_all_frames.tcl`, `with_capture.tcl`, `without_capture.tcl`, `visualization.tcl`, `la.tcl`, `orient.tcl`, `viewpoint_example.tcl`. VR scene helpers: `vr_prepare.tcl` and `split_large_reps.tcl` (see [VR Quick Start](#vr-quick-start), Step 2). |
 | `data/` | Sample MutLα structure and trajectory (`mutl_open_CA.pdb`, `Example_Trajectory.xtc`) and the example movie. |
 | `start_vr.tcl`, `VMD_VR_Bridge/` | VMD side of the VR viewer: launcher and TCP bridge, with its regression tests. |
 | `Unity_VR_Client/` | Unity 6 project of the VR viewer. Build output goes to the ignored `Unity_VR_Client/Builds/`. |
@@ -32,6 +32,8 @@ mol addfile output_NVT_timecorrected.xtc first 12800 last 16069
 ### Step 2. Modify parameters in `animation/render.tcl` to customize the rendering.
 ### Step 3. Source the script
         source animation/render.tcl
+
+To view the same scene in VR, continue with [VR Quick Start](#vr-quick-start). If you used `vr_prepare` or `split_large_reps` on it, run `vr_unprepare` and `unsplit_large_reps` before the movie-making steps below.
 
 ## Align all frames to a reference region
 ### Step 1. Source the alignment script
@@ -147,24 +149,92 @@ You can see the example movie here: [MutLα](https://youtu.be/FPb0yXllI84)
 
 ## VMD and Unity viewer
 
-The repository contains an experimental local bridge between VMD and a Unity client. VMD supplies molecular data, representation settings and coordinate snapshots. Unity controls coordinate playback and its own camera; pause and seek synchronize the displayed frame back to VMD. Compatible scenes render directly in Unity, while other scenes use exported VMD meshes. The client runs on the desktop, in the XR Interaction Simulator, or in an OpenXR headset connected to the same computer; see [XR modes](#xr-modes). Headset mode has been run on a Valve Index with SteamVR only; see [docs/VR_ISSUES.md](docs/VR_ISSUES.md) for what was found and for the Meta Quest procedure.
+The repository contains an experimental local bridge between VMD and a Unity client. VMD supplies molecular data, representation settings and coordinate snapshots. Unity controls coordinate playback and its own camera; pause and seek synchronize the displayed frame back to VMD. Compatible scenes render directly in Unity, while other scenes use exported VMD meshes. The client runs on the desktop, in the XR Interaction Simulator, or in an OpenXR headset connected to the same computer; see [XR modes](#xr-modes). Headset mode has been tested mainly on a Valve Index with SteamVR, and a Meta Quest has been run once over Link; see [docs/VR_ISSUES.md](docs/VR_ISSUES.md) for what was found and for the Meta Quest procedure.
 
-### Quick Start
+### VR Quick Start
 
-1. Clone or download this repository. Install VMD (tested with Windows x64 VMD `1.9.4a53`) and Unity `6000.6.2f1` through Unity Hub. Run VMD and Unity on the same PC.
-2. Open a fresh VMD session. In **Extensions → Tk Console**, replace the path below with the repository root and run:
+Every scene, the bundled MutLα sample or your own, goes through the same steps:
 
-   ```tcl
-   cd {C:/path/to/VMD_Animation}
-   source animation/render.tcl
-   source start_vr.tcl
-   ```
+**Load a scene in VMD → adapt it for VR (only if needed) → start the bridge → start the viewer → check the status line.**
 
-   This loads the bundled PDB and XTC and starts the bridge. Wait for `VMD-VR bridge listening on localhost:45454`.
-3. In Unity Hub, open the `Unity_VR_Client` folder as a project. After import, open `Assets/Scenes/SampleScene.unity` and enter **Play** mode. The Editor uses the XR Interaction Simulator by default, so you can do this check without a headset.
-4. Wait for the molecule and the `[Unity live]` status. A PC without live QuickSurf support can show `[VMD mesh]` instead. Focus the Game view and press **Enter** to start playback. If the status stays at `[Offline]`, check that VMD is still running and the bridge is listening on port `45454`.
+No VR-specific copy of a scene script is needed. The VR steps work on whatever VMD has loaded, however it was set up.
 
-For a headset or a Windows build that runs without the Unity Editor, see [Build, run, deploy](#build-run-deploy).
+#### Step 0. Install (once)
+
+Clone or download this repository. Install VMD (tested with Windows x64 VMD `1.9.4a53`). To run the viewer from the Unity Editor or to build it, also install Unity `6000.6.2f1` through Unity Hub. VMD and the viewer must run on the same PC. On a PC without Unity, such as the lab PC, use a bundle made by [`vr deploy`](#build-run-deploy) instead; its `INSTRUCTIONS.txt` repeats these steps.
+
+#### Step 1. Load a scene in VMD
+
+Open a fresh VMD session and, in **Extensions → Tk Console**, `cd` to the repository root (or the extracted bundle folder). Then load the scene in one of these ways:
+
+| Scene | How to load it |
+| --- | --- |
+| Bundled MutLα sample | `source animation/render.tcl` |
+| Your own data in the movie-making style | Copy `animation/render.tcl`, change its file paths and reps (see [Render](#render)), and source the copy |
+| Any other scene | Source its own script or `.vmd` state file, or load and set it up in the VMD GUI |
+
+```tcl
+cd {C:/path/to/VMD_Animation}
+source animation/render.tcl
+```
+
+#### Step 2. Adapt the scene for VR (only if needed)
+
+Unity draws a scene itself (`[Unity live]`: smooth playback, ray highlighting, drawing-method switching) only when every visible rep uses VDW, CPK, NewCartoon or QuickSurf with a supported coloring and an opaque material. `animation/render.tcl` already qualifies, so the sample can skip this step. For any other scene, check first:
+
+```tcl
+source animation/vr_prepare.tcl
+vr_prepare -check     ;# prints what would change; changes nothing
+vr_prepare            ;# converts the visible reps in place
+```
+
+`vr_prepare` turns Lines, Licorice and Bonds into CPK, Points into small VDW spheres, Tube, Cartoon and Ribbons into NewCartoon, and Surf or MSMS into QuickSurf. It hides water, other molecules and drawing methods Unity cannot draw (for example HBonds or Isosurface), and prints every change. A scene that already qualifies is left unchanged. The result looks close to, not identical to, VMD. Run it **before** Step 3: `start_vr.tcl` hides Lines reps, and `vr_prepare` leaves hidden reps alone. Options are listed at the top of [`animation/vr_prepare.tcl`](animation/vr_prepare.tcl).
+
+If `vr_prepare` reports a QuickSurf rep that is too large, or a large or sparse system later looks blocky in Unity (the status line says the QuickSurf grid was coarsened), split it:
+
+```tcl
+source animation/split_large_reps.tcl
+split_large_reps top -check
+split_large_reps top
+```
+
+The default keeps VMD's bonded fragments together, which suits all-atom models. For coarse-grained models without bonds, give the size of one repeated unit, for example `-unit block 1268` for the nucleosome system. Options and costs are listed at the top of [`animation/split_large_reps.tcl`](animation/split_large_reps.tcl).
+
+#### Step 3. Start the bridge
+
+```tcl
+source start_vr.tcl
+```
+
+Wait for `VMD-VR bridge listening on localhost:45454`. If the bridge is already running when you change the scene, you do not need to source it again: Unity reloads the scene by itself.
+
+#### Step 4. Start the viewer
+
+| Where | How |
+| --- | --- |
+| Unity Editor, no headset | In Unity Hub, open the `Unity_VR_Client` folder as a project. Open `Assets/Scenes/SampleScene.unity` and enter **Play** mode. The Editor uses the XR Interaction Simulator by default. |
+| Built player on this PC | `vr build` once, then `vr run -Runtime desktop`, `xrsim` (Meta XR Simulator) or `steamvr`. See [Build, run, deploy](#build-run-deploy). |
+| Lab bundle with a headset | Double-click `Start_Index_SteamVR.cmd`, or for a Quest start Link in the headset first and then double-click `Start_Quest_MetaLink.cmd`. See the bundle's `INSTRUCTIONS.txt` and [docs/VR_ISSUES.md](docs/VR_ISSUES.md). |
+
+Start playback with **Enter** in the Game view or desktop window, or with the right **A** button in a headset. All controls are listed under [Desktop controls](#desktop-controls) and [XR controls](#xr-controls).
+
+#### Step 5. Check the status line
+
+| Status | Meaning | What to do |
+| --- | --- | --- |
+| `[Unity live]` | Unity draws the scene itself. | Nothing. |
+| `[VMD mesh]` | Some visible rep cannot be drawn by Unity, so VMD exports static meshes. A PC without live QuickSurf support also shows this. | Run Step 2 (`vr_prepare -check`). |
+| `[Offline]` | The viewer cannot reach the bridge. | Check that VMD is still running, then `source start_vr.tcl` again. The viewer reconnects by itself. |
+| QuickSurf grid coarsened | A QuickSurf rep spans too large a box. | Run `split_large_reps` (Step 2). |
+
+#### Back to movie-making in the same VMD session
+
+`vr_prepare` and `split_large_reps` change the reps in place. Before rendering movies from the same scene, restore it:
+
+```tcl
+vr_unprepare
+unsplit_large_reps
+```
 
 ### Build, run, deploy
 
@@ -178,7 +248,7 @@ Run the commands from the repository root in a Command Prompt or PowerShell (`vr
 | --- | --- |
 | `vr build [-Stereo SPI\|MultiPass\|All]` | Batch-mode Unity build of the Windows player into `Unity_VR_Client/Builds/Windows/<Stereo>/`, through `Assets/Editor/VMDBuild.cs`. Default: Single Pass Instanced. The Unity Editor must not have the project open. Project-settings files that Unity rewrites during the build are restored afterwards. Log: `Builds/logs/build_<Stereo>.log`. |
 | `vr run [-Runtime xrsim\|steamvr\|metalink\|desktop\|<runtime .json>] [-Seconds 60] [-Stop]` | Starts the built player against one runtime (default: Meta XR Simulator), checks that the VMD bridge is listening, follows the player log, prints the mode, the XR start, the molecule placement (`[VMDView]` lines) and the VMD connection, and ends with PASS or FAIL. Arguments after `--` go to the player. Log: `Builds/logs/run_<runtime>_<time>.log`. |
-| `vr deploy [-Target all\|index\|quest] [-SkipBuild]` | Builds SPI and MultiPass, then writes `Builds/deploy/VMD_VR_Lab_<date>_<commit>.zip` for the lab PC: both players, `start_vr.tcl`, the bridge, `animation/render.tcl`, the sample data, `docs/VR_ISSUES.md`, `INSTRUCTIONS.txt` and double-click launchers. |
+| `vr deploy [-Target all\|index\|quest] [-SkipBuild] [-LocalExamples]` | Builds SPI and MultiPass (unless `-SkipBuild`), then writes `Builds/deploy/VMD_VR_Lab_<date>_<commit>.zip` for the lab PC: both players, `start_vr.tcl`, the bridge (without its tests), `animation/render.tcl`, `animation/vr_prepare.tcl`, `animation/split_large_reps.tcl`, the sample data, `docs/VR_ISSUES.md`, `INSTRUCTIONS.txt`, `run_player.cmd` and the double-click launchers. `-Target index` or `quest` packs only that headset's launchers (plus `Start_Desktop.cmd`) and adds `_index` or `_quest` to the name. `-LocalExamples` also packs this checkout's git-ignored `animation/*.tcl` scripts and `data/` files (not movies or subfolders), lists them in `EXTRA_EXAMPLES.txt` and adds `_examples` to the name. A checkout with uncommitted changes to tracked files gets `-dirty` after the commit. |
 | `vr test` | Runs the four bridge regression tests in VMD text mode (see [Validation](#validation)) and summarizes their results. |
 
 Lab bundle launchers (in `tools/bundle/`, copied into every bundle) pick the runtime for that launch only, from the registered OpenXR runtimes (readable without admin rights) or the usual install folders, and say so if none is found:
@@ -282,7 +352,7 @@ When a client connects, the bridge sends `READY VMD_VR_BRIDGE <protocolVersion>`
 
 ### Unity client
 
-`Unity_VR_Client/` uses the Universal Render Pipeline. See [Quick Start](#quick-start) to open the project and connect to VMD.
+`Unity_VR_Client/` uses the Universal Render Pipeline. See [VR Quick Start](#vr-quick-start) to open the project and connect to VMD.
 
 Current scripts under `Assets/Scripts/`:
 
@@ -374,9 +444,9 @@ On Valve Index controllers the grip reports finger curl, so simply holding the c
 
 **Headset connection.** The bridge listens only on `127.0.0.1` and exports meshes through local files, so the headset must run as a PC VR display of the computer running VMD (for example Quest Link, Air Link or SteamVR). A standalone headset app cannot reach the bridge.
 
-**Tested hardware.** Headset mode has been run only on a Valve Index with SteamVR as the OpenXR runtime. The sizes, distances, panel layout and grab behavior described here were chosen on that headset. A Meta Quest 3S is the next target and is untested; the code does not branch on the headset model, and the differences are these:
+**Tested hardware.** Headset mode has been tested mainly on a Valve Index with SteamVR as the OpenXR runtime. The sizes, distances, panel layout and grab behavior described here were chosen on that headset. A Meta Quest has been run once over a USB cable (Link), on 2026-11-23, and was reported as working; its Player.log and detailed checks are not recorded yet (see [docs/VR_ISSUES.md](docs/VR_ISSUES.md), issue 12). The code does not branch on the headset model, and the differences are these:
 
-| | Valve Index (tested) | Meta Quest 3S (untested) |
+| | Valve Index (tested) | Meta Quest (run once) |
 | --- | --- | --- |
 | PC software and OpenXR runtime | SteamVR | Meta Horizon Link, or SteamVR through the Steam Link app on the headset |
 | Connection | Cable to the link box; base stations for tracking | USB-C cable (Link) or Wi-Fi (Air Link, Steam Link); inside-out tracking; a Meta account |
@@ -498,7 +568,7 @@ Current behavior and limitations:
 - The Unity NewCartoon coordinate renderer supports CA-only amino-acid models as smooth coils without STRIDE. VMD Wavefront export may still produce empty NewCartoon geometry for CA-only data; use the live route or a complete-backbone structure where appropriate.
 - Once the coordinate buffer is full, `TRAJ_CHECK` validates the snapshot at 0.75-second intervals. The paused mesh route polls the scene signature every 0.5 seconds and coalesces refresh requests. Camera-only changes do not trigger an export. In-place coordinate, radius or bond edits not reflected in scene settings require restarting Play mode.
 - The coordinate buffer defaults to 24 frames and targets 64 MiB of positions, with a minimum of two frames (one for a single-frame molecule). This excludes metadata, rendering buffers and parsing allocations. Requests contain at most four frames, reduced for large molecules. QuickSurf uses a bounded GPU grid and may coarsen its spacing; its surface can lag the displayed coordinate frame.
-- Headset mode has been run on a Valve Index only; a Meta Quest 3S and the changes made after that test are still unverified (see [docs/VR_ISSUES.md](docs/VR_ISSUES.md)). Standalone (untethered) headset apps, atom-picking metadata beyond the domain under the ray and cross-computer mesh transfer remain outside this phase.
+- Headset mode has been tested mainly on a Valve Index; a Meta Quest has been run once (reported working, details not recorded), and some changes made after the Index tests are still unverified (see [docs/VR_ISSUES.md](docs/VR_ISSUES.md)). Standalone (untethered) headset apps, atom-picking metadata beyond the domain under the ray and cross-computer mesh transfer remain outside this phase.
 
 ### Validation
 

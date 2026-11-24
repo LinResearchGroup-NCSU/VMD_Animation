@@ -2,9 +2,10 @@
 
 First real-headset test: 2026-11-10, NCSU D. H. Hill Jr. Library Gaming & VR Studio.
 Hardware: Valve Index with SteamVR (SteamVR is the active OpenXR runtime), NVIDIA GeForce RTX 5080, plus an Intel integrated GPU in the same PC.
+First Meta Quest test: 2026-11-23, same Studio, on a different PC with an NVIDIA GeForce RTX 4060, connected over a USB cable (Link).
 Build: `VMD_VR_Lab_v3` (Single Pass Instanced). VMD scene set up by `render.tcl`, now `animation/render.tcl` (three QuickSurf domain representations).
 
-**Device basis of this file.** Every observation, fix and number below comes from the Valve Index with SteamVR. Nothing has been run on another headset. The next tests will use a Meta Quest 3S: its launch procedure is in [Launch procedure with a Meta Quest 3S](#launch-procedure-with-a-meta-quest-3s-untested), and steps or notes that apply only to the Index are marked **(Index only)**.
+**Device basis of this file.** Unless an entry names the Meta Quest, every observation, fix and number below comes from the Valve Index with SteamVR. The Quest has been run once (2026-11-23, reported as successful; see issue 12); its launch procedure is in [Launch procedure with a Meta Quest](#launch-procedure-with-a-meta-quest-first-run-2026-11-23), and steps or notes that apply only to the Index are marked **(Index only)**.
 
 Since the build/run/deploy cleanup, bundles are made with `vr deploy` (see [Build, run, deploy](../README.md#build-run-deploy)) and started with a `Start_*.cmd` launcher, which picks the headset's OpenXR runtime for that launch only. Bundles `v1` to `v6` were assembled by hand and started with `SPI\Unity_VR_Client.exe` directly.
 
@@ -43,7 +44,7 @@ Since the build/run/deploy cleanup, bundles are made with `vr deploy` (see [Buil
   ```
   **(Index only)** It must end in `SteamVR\steamxr_win64.json`. If it does not, set it in SteamVR → Settings → show Advanced Settings → Developer → Set SteamVR as OpenXR Runtime. For a Quest 3S over Link the expected value is different; see the Quest section.
 - **Desktop only, no headset:** double-click `Start_Desktop.cmd`, or run `Unity_VR_Client.exe -desktop`.
-- **Geometry appears in only one eye:** start the launcher with `MultiPass` as its argument (for example `Start_Index_SteamVR.cmd MultiPass` in a Command Prompt), or use `MultiPass\Unity_VR_Client.exe`.
+- **Geometry appears in only one eye:** the `Start_*.cmd` launchers start the Multi-pass player by default (since 2026-11-17, see issue 9). If the SPI player was started (`SPI\Unity_VR_Client.exe`, or a launcher with `SPI` as its argument), use the launcher without arguments.
 - **The view is not in front of you:** click the left thumbstick (recenter). Then copy Player.log: its `[VMDView]` lines record the tracking origin and every placement.
 - **Player log:** `%USERPROFILE%\AppData\LocalLow\DefaultCompany\Unity_VR_Client\Player.log`. Open it with `notepad` from Win+R while the player is still running.
 - **Unity shows "[Offline] Connecting to VMD":** run `source start_vr.tcl` again in VMD; Unity reconnects by itself.
@@ -53,21 +54,21 @@ Since the build/run/deploy cleanup, bundles are made with `vr deploy` (see [Buil
 2. Sign out of Google in the browser, and of any personal Steam or Meta account.
 3. Sign out of Windows.
 
-## Launch procedure with a Meta Quest 3S (untested)
+## Launch procedure with a Meta Quest (first run 2026-11-23)
 
-This procedure has not been run. It is written from how Quest Link works and from the project's OpenXR settings, so expect to adjust it at the first test. "Before going", steps 1, 2, 5 and 7 of "At the lab", and "Before leaving" are the same as for the Index. Steps 3, 4 and 6 are replaced by the steps below.
+This procedure was written for a Quest 3S from how Quest Link works and from the project's OpenXR settings. It has been run once, over a USB cable on a Studio PC with an RTX 4060, and the user reported the run as successful; which steps were followed exactly and the Player.log of that run have not been recorded yet, so it may still need adjusting. "Before going", steps 1, 2, 5 and 7 of "At the lab", and "Before leaving" are the same as for the Index. Steps 3, 4 and 6 are replaced by the steps below.
 
 ### What differs from the Index
 
-| | Valve Index (tested) | Meta Quest 3S (untested) |
+| | Valve Index (tested) | Meta Quest (run once) |
 | --- | --- | --- |
 | PC software | SteamVR, already on the lab PC | Meta Horizon Link PC app; installing it may need admin rights |
 | OpenXR runtime | SteamVR | Meta Horizon Link |
 | Account | None | A Meta account; the headset is set up with the Meta Horizon phone app |
-| Connection | Cable to the link box | USB-C data cable (Link), or Wi-Fi (Air Link) |
+| Connection | Cable to the link box | USB cable (Link); Wi-Fi (Air Link) needs a shared local network, see below |
 | Tracking | Base stations in the room | Cameras in the headset; no base stations |
 | Start order | Start the player; it launches SteamVR | Start Link in the headset first, then the player |
-| Grab | Squeeze the grip firmly (`VMDIndexGrip`) | Hold the grip button; release it to let go |
+| Grab | Hold the trigger (`VMDIndexGrip`); let go to release | Hold the grip button; release it to let go |
 | Face buttons | A / B on both controllers | A / B on the right, X / Y on the left |
 | Controller profile | Valve Index Controller Profile | Meta Quest Touch Plus, or Oculus Touch as the fallback; both are enabled in the project |
 
@@ -85,7 +86,12 @@ The player is the same build for both headsets. It still has to run on the PC th
 
 **Alternative without the Meta PC app.** Install the **Steam Link** app on the headset, connect it to the PC (pairing code shown in the headset, entered in Steam on the PC), wait for the SteamVR home, then double-click `Start_Quest_SteamLink.cmd`. The headset and the PC must be on the same local network, and campus Wi-Fi often blocks the discovery this needs. Do not plug the USB cable into the PC: the headset then keeps offering Quest Link instead.
 
-### What to check on the first Quest 3S run
+### Cable, and why not Air Link
+
+- **Cable.** The headset end is USB-C. The PC end can be USB-C or USB-A; use a USB 3 port (blue inside, or marked SS) on the back of the case, not a front-panel port, a monitor or a hub. The Hill Library lends a male USB-A to female USB-C adapter (blue, USB 3); put a USB-C to USB-C **data** cable between it and the headset. A charge-only cable makes the PC see nothing. The headset's own short cable works for a seated session next to the PC; standing or walking needs a 3-5 m USB 3 cable. Check the speed in Meta Horizon Link → Devices → the headset → **USB Connection Test**.
+- **Air Link.** The headset must reach the PC on the same local network. The RTX 4060 PC is wired only (Task Manager → Performance lists `Ethernet 2` and no Wi-Fi), its Settings → Network & internet page is hidden by policy, and campus Wi-Fi isolates devices, so the PC does not appear in the headset's Air Link list. Air Link would need a network the Studio sets up for it; ask the staff. To test quickly: Meta Horizon Link signed in on the PC, headset on Wi-Fi, then **Quick Settings → Link** in the headset: if the PC is not in the list, use the cable.
+
+### What to check on the next Quest run
 
 - Player.log shows `[VMDXRBootstrap] XR started.`, not `reloading in desktop mode`.
 - `[VMDIndexGrip]` does **not** appear in the log. That line is for Index controllers only.
@@ -126,6 +132,13 @@ The player is the same build for both headsets. It still has to run on the PC th
 - **Molecule stays in the hand and cannot be put down (Index; fix in v5).**
   - Cause: XRI's Select is bound to `{GripButton}`. On Index controllers that is `/input/squeeze/value`, which follows finger curl, so just holding the controller counts as a pressed grip.
   - Fix: the new `VMDIndexGrip` runs only when an Index controller is present. It switches the grab interactors' select input to `gripForce`. Squeeze firmly (force ≈ 0.3) to grab, and relax the hand to let go. Teleport and other interactors are not touched.
+  - **Still seen on 2026-11-17 (Multi-pass player):** the molecule followed the controller ray whether or not the grip was squeezed, although the log showed `[VMDIndexGrip] Index controllers found; 2 interactors now grab on a squeeze (force 0.3).` The cause is not known yet. A molecule that stays held also explains why the right thumbstick click (immersive size) seemed to do nothing: the grab moves and scales the molecule back every frame. The status panel sometimes moved as well.
+  - Diagnostics added: `VMDMoleculeGrab` logs `[VMDGrab]` lines for every grab and release and every 2 s while held, with each holding interactor's select value and pressed state; `VMDStatusPanel` logs `[VMDView] Status panel placed`.
+  - Likely cause (from the code; the user saw it start as soon as both controllers were switched on): until `VMDIndexGrip` sees an Index controller, the interactors still use XRI's grip binding, so a controller held while it turns on can grab at once (the molecule's grab volume is large and easily under the ray). The switch to the new binding left that grab in place, and XRI releases only when the new binding reports a release, which never came.
+  - Also reported: pulling the trigger did nothing for grabbing or scaling (only a firm squeeze did), and the controller ray stopped in empty space or switched between long and short. The grab volume was the bounding sphere of the molecule, much larger than the molecule; at immersive size (4 m radius) the user stands inside it, where the ray cannot hit it but the hand is inside it, so the interactor switches between far (long ray) and near (short ray) mode.
+  - After that fix (bundle v3), the panel buttons stopped working: a trigger pull aimed at a button also grabbed the molecule behind the panel, and XRI then blocked the button press. Fix (not yet run on a headset): a pull that starts while the ray is on a panel button is a button press only (`VMDIndexGrip.TriggerGrab`); the panel background is no longer a UI target, so only buttons count as UI and the drag bar is reachable.
+  - Also reported with v3: at immersive size the highlight hardly changed. When the ray met nothing, `VMDRayHighlight` picked the structure containing the hand, which at immersive size is nearly always the case, so the highlight stayed on that structure. That fallback is removed; only what the ray enters is highlighted. Each change of the pointed structure is logged as `[VMDHighlight] Ray on ... (hit surface|atom|nothing); hand inside ...; immersive ...`.
+  - Fix (not yet run on a headset): Index controllers now grab with the **trigger** (pull to grab, let go to release; both triggers scale), and the switch cancels any grab made before it (`[VMDIndexGrip] ... grab(s) made before the switch released`). The grab volume is now the box around the drawn geometry. At immersive size the hand is still inside the box, so grabbing there drags the molecule from within (near grab).
 
 ### 3. The status panel is small, tilted, and stuck to the hand
 - Code: `VMDStatusPanel`.
@@ -173,3 +186,40 @@ The player is the same build for both headsets. It still has to run on the PC th
 - Fix: after XR starts, `VMDXRBootstrap.ApplyTrackingOrigin` assigns `XROrigin.RequestedTrackingOriginMode` again, which makes the XR Origin set up again, and retries until the runtime reports a mode (at most 3 s). The first placement waits for it. In the simulator the log now shows `current Floor`, a Camera Offset of 0 and the head at 1.70 m; the molecule's center is 1.5 m ahead and 0.4 m below eye level.
 - Also changed: the first placement waits until the head pose has been steady for 1 s (at most 10 s); a change of the runtime's tracking origin (system recenter) places the molecule and panel again; `[VMDView]` lines log the tracking origin and every placement.
 - The Valve Index runs went through the same startup path, so their eye height was probably wrong as well (compare issue 2). Check both headsets with the new bundle and keep Player.log: the `[VMDView] XR started` line must show `current Floor` (or `Device`) and the head's world height must be about your eye height.
+- Valve Index, 2026-11-17 (bundle `VMD_VR_Lab_20261117_c8666d1-dirty_index`): the log showed `current Floor` with the camera offset object at 0, so the tracking origin fix works with SteamVR. The placement itself was still wrong, for a different reason; see issue 8.
+- Meta Quest, 2026-11-23: the user reported the run as successful (issue 12). The `[VMDView]` lines of that run have not been checked, so keep this issue open until a Quest Player.log shows `current Floor` (or `Device`) and a head height near eye height.
+
+### 8. The molecule is placed before the headset is worn (Valve Index, 2026-11-17; fix not yet run on a headset)
+- Observation: the molecule looked far away and flat and could not be brought close; the status panel was out of view.
+- Log: `[VMDView] Placed (first placement, in front): head local (-0.63, 0.75, -0.81) ... roll -24 ... t=13.6 s`, with the target at 0.60 m height. The OpenXR session only reached `XR_SESSION_STATE_FOCUSED`, the state in which the user sees the app, about 19 s later. The head pose was that of the headset lying on the desk (0.75 m high, tilted 24°), which SteamVR reports as tracked and perfectly steady, so the "head steady for 1 s" check (issue 7) passed at once. No later `Placed` line: recenter (left thumbstick click) was never used in that run.
+- Fix: in Headset mode the first placement now waits until the headset is in use, that is, the OpenXR session is focused (`OpenXRUtility.IsSessionFocused`) and the runtime reports a user present (`OpenXRUtility.IsUserPresent`, from `XR_EXT_user_presence`); only then does the 1 s steady-head wait (at most 10 s) start. The status panel is placed again together with the molecule. New log line: `[VMDView] Headset not in use yet; waiting before placing` / `Headset in use; placing once the head is steady`, with both flags.
+- Not changed: taking the headset off and putting it on again later does not place the molecule again, so grabs and scaling are kept; click the left thumbstick to recenter.
+- Workaround for older bundles: after putting the headset on, click the left thumbstick once.
+- Headset run 2026-11-18 (bundle `20261118_c8666d1-dirty_index`): the wait worked (`Headset in use ... user present True` at 5.6 s and again at 15.0 s after a dashboard visit), but the steady-head check then fired while the user, seated, looked down and to the side: `Placed (first placement, in front): head local (1.02, 1.02, 0.72) ... yaw 235, pitch 34`. The molecule landed near the play-area center instead of ahead (later recenters: yaw 356). Not changed: for the demo, face forward and click the left thumbstick after putting the headset on. A possible fix is to also require a near-level gaze before the first placement.
+
+### 9. Single Pass Instanced shows one eye only (Valve Index, 2026-11-17)
+- Observation: with the SPI player the right eye showed no picture; the Multi-pass player showed both eyes. (Issue 1 had found SPI working on an earlier bundle.)
+- What SPI needs: the scene is drawn once into a two-layer eye texture, with GPU instancing selecting the eye. Every shader, custom draw call and render pass must handle both layers; one that handles only the first leaves the second eye empty. Multi-pass draws the scene once per eye with ordinary rendering, so nothing needs that support. The project's own shaders (`VMDQuickSurf`, `VMDNewCartoon`, `VMDCoordinateInstances`, `VMDStaticGeometry`) do include the stereo instancing macros.
+- Cause: not found yet. A suspect is URP's GPU Resident Drawer, which is enabled in `PC_RPAsset.asset` (`m_GPUResidentDrawerMode: 1`; the log shows `GPU Resident Drawer created.`).
+- Change: the `Start_*.cmd` launchers now start the Multi-pass player by default; `SPI` as the launcher's argument starts the SPI player for comparison. For this scene the extra cost of Multi-pass is small on the lab PC's RTX 5080.
+- Also seen: the Multi-pass picture looked slightly soft. MSAA was off in `PC_RPAsset.asset`; it is now 4x. Also check SteamVR's per-application render resolution (Settings → Video) and the Index IPD and lens-distance knobs.
+
+### 10. Panel buttons do nothing at immersive size (Valve Index, 2026-11-18; fix not yet run on a headset)
+- Observation: at immersive size the status panel's buttons (Highlight, Speed, Play ...) could not be pressed; the controller buttons (A, B, sticks) still worked.
+- Log: every trigger pull aimed at the panel at immersive size became a grab of the molecule (`[VMDGrab] Grabbed by Near-Far Interactor (Right, ...)`, t=245-256 s).
+- Cause: at immersive size the hand is always inside the molecule's grab volume, so XR Interaction Toolkit's Near-Far interactor casts only near: it turns its ray off, and with it UI presses, and the trigger grabs the molecule from within.
+- Fix: `VMDStatusPanel.KeepRaysOnPanel` turns near casting off for a hand whose ray aims at the panel and that holds nothing, so that ray works as a far ray on the buttons and the drag bar; elsewhere near grabbing is unchanged.
+- Workaround for older bundles: press the right stick to return to in-front size, use the panel, then press the right stick again.
+- Also verified on the Index in this run: seated head height about 1.0 m, trigger grab and release, the Speed button, B cycling the drawing method, immersive size, ray highlighting and dragging the panel.
+
+### 11. Pressing B froze VMD with many NewCartoon reps (Valve Index, 2026-11-18; fixed in the bridge)
+- Observation: with the nucleosome example split into 76 QuickSurf reps (`split_large_reps`), right B switched all of them to NewCartoon, after which Unity showed `VMD coordinate request timed out` and playback stopped.
+- Cause: the bridge rebuilt the whole molecule's backbone and structure data for every NewCartoon rep, in TRAJ_OPEN and in the snapshot signature checked on every coordinate request. With 76 reps on 126800 beads TRAJ_OPEN took 112 s, far beyond Unity's 15 s request timeout.
+- Fix: `cartoon_molecule_data` computes the backbone data once per TRAJ_OPEN, and `trajectory_signature` adds the structure codes once per molecule. TRAJ_OPEN now takes 0.65 s for that scene; its reply is byte-for-byte the same as before for that scene and for the MutLα example (QuickSurf, NewCartoon with gaps and Structure coloring, unsupported colorings), and all 58 bridge regression tests pass.
+
+### 12. Meta Quest: first run works; the picture is more jagged on the RTX 4060 PC (2026-11-23)
+- Observation: the first Quest run, over a USB cable on a Studio PC with an RTX 4060 (8 GB), was reported as successful. The picture showed more jagged edges and was less sharp than on the RTX 5080 PC.
+- Not the player's settings: the Standalone quality level uses `PC_RPAsset.asset` (MSAA 4x, render scale 1) on both PCs. Likely causes are on the Link side: Meta Horizon Link picks its render resolution from the GPU, and Link compresses the picture before sending it over the cable.
+- To try: Meta Horizon Link → Devices → the headset → **Graphics Preferences**: refresh rate 72 Hz, render resolution one step higher; restart Link. Step back if the picture starts to stutter. The setting is per PC.
+- Effect on large-system tests: correctness does not depend on the GPU (coordinates, trajectory playback and representations come from VMD and the bridge), but frame rate does, and the RTX 4060 has 8 GB of video memory against 16 GB on the RTX 5080. While a large system is loaded, watch Task Manager → Performance → the NVIDIA GPU → **Dedicated GPU memory**; usage near 8 GB means the scene does not fit. Record which PC each large-system test ran on, and run performance tests and demos on the RTX 5080 PC when possible.
+- Still to record from that run: the bundle name, the launcher used, Player.log (`[VMDXRBootstrap] XR started.`, `[VMDView]` lines), and the checks in [What to check on the next Quest run](#what-to-check-on-the-next-quest-run).

@@ -28,6 +28,20 @@ DEVICE BASIS
    animation/render.tcl loads the sample molecule and builds the three QuickSurf domains.
    Without it the scene is empty, because start_vr.tcl hides the default Lines.
 
+3. Your own scene instead of the sample: load it with its own script, .vmd file or the VMD
+   menus instead of "source animation/render.tcl", then adapt it BEFORE start_vr.tcl:
+
+     source animation/vr_prepare.tcl
+     vr_prepare -check
+     vr_prepare
+     source start_vr.tcl
+
+   vr_prepare -check only prints what would change. vr_prepare turns drawing methods Unity
+   cannot draw (Lines, Licorice, Points, transparency, ...) into ones it can, and prints each
+   change. If it reports a QuickSurf rep that is too large, run the split_large_reps line it
+   prints (see animation/split_large_reps.tcl). vr_unprepare restores the original reps.
+   The panel status should then say [Unity live]; [VMD mesh] means a rep is still unsupported.
+
 [[index]]
 ------------------------------------------------------------------------------
 2A. VALVE INDEX + STEAMVR
